@@ -12,7 +12,7 @@ def _sort_card(rgb, cfg):
     feats = extract_features(rgb, cfg)
     proba = clf.predict_proba(np.array([[feats[k] for k in feat]], float))[0]
     probs = {classes[i]: float(proba[i]) for i in range(len(classes))}
-    return {"classes": probs, "top": max(probs, key=probs.get)}
+    return {"classes": probs, "top": max(probs, key=lambda k: probs[k])}
 
 def analyze_closeup(rgb: np.ndarray, cfg) -> dict:
     """Classical/CPU path (GPU U-Net wiring is added later behind loader.gpu_available)."""
