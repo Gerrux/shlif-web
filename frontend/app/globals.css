@@ -254,6 +254,12 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .welcome.full { min-height: 100dvh; border-radius: 0; border: 0; margin: 0; padding: clamp(40px, 8vh, 96px) 24px; }
 .theme-float { position: fixed; top: 16px; right: 18px; z-index: 30; }
 
+/* Ссылки на команду внизу welcome-сцены */
+.welcome-credits { position: absolute; left: 0; right: 0; bottom: clamp(18px, 3.4vh, 32px); display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: center; font-size: 12.5px; }
+.welcome-credits .wc-label { color: oklch(58% 0.015 250); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+.welcome-credits .wc-link { display: inline-flex; align-items: center; gap: 6px; color: oklch(80% 0.02 250); text-decoration: none; transition: color .15s; }
+.welcome-credits .wc-link:hover { color: var(--brand); }
+
 /* Дроп-зона загрузки */
 .dropzone { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 82vw); padding: 40px 28px; border-radius: 16px; border: 1.5px dashed oklch(100% 0 0 / .3); background: oklch(100% 0 0 / .04); color: oklch(88% 0.02 250); cursor: pointer; text-align: center; transition: border-color .15s, background .15s, transform .15s; backdrop-filter: blur(4px); }
 .dropzone:hover { border-color: var(--brand); background: oklch(100% 0 0 / .07); }
