@@ -45,7 +45,7 @@ export default function Home() {
         <div>
           {shown ? <VerdictPanel result={shown} /> :
             job.data?.status === "error" ? <div className="note">Ошибка: {job.data.message}</div> : null}
-          {shown && mode === "closeup" && !editing ? <button onClick={() => setEditing(true)} style={{ marginTop: 12 }}>✎ Доработать маски</button> : null}
+          {shown && shown.mode === "closeup" && !editing ? <button onClick={() => setEditing(true)} style={{ marginTop: 12 }}>✎ Доработать маски</button> : null}
         </div>
       </div>
     </main>

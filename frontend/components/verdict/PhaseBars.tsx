@@ -1,4 +1,5 @@
 import type { Verdict } from "@/lib/api/types";
+import { oreRu } from "@/lib/ore";
 const ROWS: [string, string, string][] = [
   ["Доля талька", "talc_frac", "var(--phase-talc-ink)"],
   ["Тонкие срастания", "fine_share", "var(--phase-fine-ink)"],
@@ -20,7 +21,4 @@ export function PhaseBars({ verdict }: { verdict: Verdict }) {
       <div className="vf"><span>уверенность {(m.confidence ?? 0).toFixed(2)}</span><span>seg+rule</span></div>
     </div>
   );
-}
-function oreRu(c: string) {
-  return { ordinary: "рядовая руда", hard: "труднообогатимая руда", talcose: "оталькованная руда", review: "на проверку" }[c] ?? c;
 }
