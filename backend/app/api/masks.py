@@ -1,10 +1,10 @@
 from __future__ import annotations
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from app.core import paths
 from app.pipeline import masks as M, loader
-from app import runtime
+from app.runtime import get_runtime
 
 router = APIRouter()
 
@@ -38,5 +38,5 @@ async def save_masks(jid: str, phases: UploadFile = File(...), talc: UploadFile 
     su, mg, mx = M.split_phase_map(pm)
     cfg = loader.get_config()
     v = M.verdict_from_masks_dict(su, mg, mx, tk & mx, cfg)
-    runtime.store.log_correction(jid, "phases+talc", int(pm.size))
+    get_runtime().store.log_correction(jid, "phases+talc", int(pm.size))
     return v

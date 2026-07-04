@@ -1,10 +1,11 @@
 from __future__ import annotations
 import io, numpy as np
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
 from app.pipeline import closeup, panorama, loader, masks
 from app.core import paths
-from app import runtime  # app-scoped store/runner (set in main.py)
+from app.runtime import get_runtime
 
 router = APIRouter()
 Image.MAX_IMAGE_PIXELS = None
@@ -19,8 +20,8 @@ def _persist_maps(jid, r):
 @router.post("/analyze")
 async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
     data = await image.read()
-    jid = runtime.store.create(mode)
-    up = paths.uploads_dir() / f"{jid}_{image.filename or 'up'}"
+    jid = get_runtime().store.create(mode)
+    up = paths.uploads_dir() / f"{jid}_{Path(image.filename or 'up').name}"
     up.write_bytes(data)
 
     def work():
@@ -39,5 +40,5 @@ async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
         return {"mode": "closeup", "verdict": r["verdict"], "sort": r["sort"],
                 "text": r["text"], "size": [w, h]}
 
-    runtime.runner.submit(jid, work)
+    get_runtime().runner.submit(jid, work)
     return {"job_id": jid}
