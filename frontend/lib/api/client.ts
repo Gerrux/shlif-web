@@ -18,6 +18,8 @@ export const maskUrl = (id: string, layer: "phases" | "talc") => `${base}/api/ma
 export const mapUrl = (id: string, name: "superpixels" | "darkness" | "confidence") => `${base}/api/maps/${id}/${name}.png`;
 export const imageUrl = (id: string) => `${base}/api/images/${id}.jpg`;
 export const reportUrl = (id: string) => `${base}/api/report/${id}.pdf`;
+export const tileManifestUrl = (id: string) => `${base}/api/tiles/${id}/manifest.json`;
+export const tileUrl = (id: string, level: number, x: number, y: number) => `${base}/api/tiles/${id}/${level}/${x}_${y}.jpg`;
 
 export async function saveMasks(id: string, phases: Blob, talc: Blob): Promise<Verdict> {
   const fd = new FormData();
