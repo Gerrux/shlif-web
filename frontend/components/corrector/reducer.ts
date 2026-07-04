@@ -1,6 +1,6 @@
-export type Tool = "superpixel" | "brush" | "eraser" | "threshold" | "autofill";
+export type Tool = "superpixel" | "brush" | "eraser" | "threshold" | "pan";
 export type Layer = "matrix" | "magnetite" | "sulfide" | "talc";
-interface Snapshot { phaseMap: Uint8Array; talc: Uint8Array; }
+export interface Snapshot { phaseMap: Uint8Array; talc: Uint8Array; }
 export interface CorrectorState {
   phaseMap: Uint8Array; talc: Uint8Array; w: number; h: number;
   tool: Tool; layer: Layer; brush: number; undoStack: Snapshot[]; redoStack: Snapshot[];
@@ -24,6 +24,13 @@ export function applyTalc(s: CorrectorState, idxs: number[], value: boolean): Co
   const talc = Uint8Array.from(s.talc);
   for (const i of idxs) talc[i] = value ? 1 : 0;
   return { ...s, talc, undoStack: [...s.undoStack, snap(s)], redoStack: [] };
+}
+// Одиночный снимок текущего состояния — для undo (публично, чтобы кисть могла
+// зафиксировать состояние в НАЧАЛЕ мазка, а не на каждом движении мыши).
+export function snapshot(s: CorrectorState): Snapshot { return snap(s); }
+// Зафиксировать результат непрерывного мазка: новые массивы + один снимок в undo.
+export function commitStroke(s: CorrectorState, pre: Snapshot, phaseMap: Uint8Array, talc: Uint8Array): CorrectorState {
+  return { ...s, phaseMap, talc, undoStack: [...s.undoStack, pre], redoStack: [] };
 }
 export function undo(s: CorrectorState): CorrectorState {
   if (!s.undoStack.length) return s;

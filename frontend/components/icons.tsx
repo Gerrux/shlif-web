@@ -43,3 +43,27 @@ export const IconScan = ({ className }: { className?: string }) => (
 export const IconArrow = ({ className }: { className?: string }) => (
   <Icon className={className} sw={2}><path d="M5 12h14M13 6l6 6-6 6" /></Icon>
 );
+export const IconDownload = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></Icon>
+);
+export const IconEye = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></Icon>
+);
+export const IconEyeOff = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="M10.6 6.1A9.7 9.7 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-2.7 3.3M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.5 9.5 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18" /></Icon>
+);
+export const IconZoomIn = ({ className }: { className?: string }) => (
+  <Icon className={className}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3M11 8v6M8 11h6" /></Icon>
+);
+export const IconZoomOut = ({ className }: { className?: string }) => (
+  <Icon className={className}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3M8 11h6" /></Icon>
+);
+export const IconHand = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="M18 11V6a2 2 0 0 0-4 0M14 6V4a2 2 0 0 0-4 0v2M10 6a2 2 0 0 0-4 0v6" /><path d="M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2a8 8 0 0 1-7.1-4.3L2.7 15a2 2 0 0 1 3.4-2.1" /></Icon>
+);
+export const IconReset = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" /></Icon>
+);
+export const IconBrush = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="M9.06 11.9 3.6 17.4a2.05 2.05 0 0 0 2.9 2.9l5.5-5.46" /><path d="M14 14 21 7a2.1 2.1 0 0 0-3-3l-7 7" /></Icon>
+);
