@@ -13,6 +13,7 @@ import {
   IconSave, IconUndo, IconRedo, IconZoomIn, IconZoomOut, IconReset, IconHand,
   IconBrush, IconEye, IconEyeOff,
 } from "@/components/icons";
+import { applyBrightness, applyClahe } from "@/lib/mask/enhance";
 
 const PHASE_RGB: Record<number, [number, number, number]> = { 1: [150, 160, 182], 2: [201, 180, 95] };
 const TALC_RGB: [number, number, number] = [79, 143, 240];
@@ -51,6 +52,7 @@ export function Corrector({
   // Пиксельный конвейер: базовый снимок RGBA кэшируется один раз; композит наложения
   // считается инкрементально (только изменённые пиксели) и блитится раз в кадр (rAF).
   const baseRGBA = useRef<Uint8ClampedArray | null>(null);
+  const enhancedRGBA = useRef<Uint8ClampedArray | null>(null);
   const outRef = useRef<ImageData | null>(null);
   const srcRef = useRef<{ pm: Uint8Array; tc: Uint8Array } | null>(null);
   const strokeRef = useRef<{ pre: Snapshot; pm: Uint8Array; tc: Uint8Array; lx: number; ly: number } | null>(null);
@@ -62,6 +64,10 @@ export function Corrector({
   const [saving, setSaving] = useState(false);
   const [vis, setVis] = useState<Vis>({ sulfide: true, magnetite: true, talc: true });
   const visRef = useRef(vis); visRef.current = vis;
+  const [maskAlpha, setMaskAlpha] = useState(0.5);
+  const maskAlphaRef = useRef(maskAlpha); maskAlphaRef.current = maskAlpha;
+  const [brightness, setBrightness] = useState(1.0);
+  const [clahe, setClahe] = useState(false);
   const [grabbing, setGrabbing] = useState(false);
   const [sideTab, setSideTab] = useState<"edit" | "report">("edit");
   const zp = useZoomPan();
@@ -92,18 +98,29 @@ export function Corrector({
       requestDraw();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.phaseMap, state?.talc, vis]);
+  }, [state?.phaseMap, state?.talc, vis, maskAlpha]);
+
+  // Яркость/CLAHE — приводим базовый снимок один раз в закэшированный буфер;
+  // composePixel всегда читает его вместо необработанного baseRGBA.
+  useEffect(() => {
+    if (!baseRGBA.current) return;
+    let buf = applyBrightness(baseRGBA.current, brightness);
+    if (clahe) buf = applyClahe(buf, w, h);
+    enhancedRGBA.current = buf;
+    if (state && !strokeRef.current) { srcRef.current = { pm: state.phaseMap, tc: state.talc }; requestDraw(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brightness, clahe]);
 
   function composePixel(pm: Uint8Array, tc: Uint8Array, i: number) {
-    const b = baseRGBA.current!, o = outRef.current!.data; const j = i * 4;
+    const b = (enhancedRGBA.current ?? baseRGBA.current)!, o = outRef.current!.data; const j = i * 4;
     let r = b[j], g = b[j + 1], bl = b[j + 2];
-    const cls = pm[i], v = visRef.current;
+    const cls = pm[i], v = visRef.current, a = maskAlphaRef.current;
     if ((cls === 2 && v.sulfide) || (cls === 1 && v.magnetite)) {
       const c = PHASE_RGB[cls];
-      r = 0.45 * r + 0.55 * c[0]; g = 0.45 * g + 0.55 * c[1]; bl = 0.45 * bl + 0.55 * c[2];
+      r = (1 - a) * r + a * c[0]; g = (1 - a) * g + a * c[1]; bl = (1 - a) * bl + a * c[2];
     }
     if (tc[i] && v.talc) {
-      r = 0.4 * r + 0.6 * TALC_RGB[0]; g = 0.4 * g + 0.6 * TALC_RGB[1]; bl = 0.4 * bl + 0.6 * TALC_RGB[2];
+      r = (1 - a) * r + a * TALC_RGB[0]; g = (1 - a) * g + a * TALC_RGB[1]; bl = (1 - a) * bl + a * TALC_RGB[2];
     }
     o[j] = r; o[j + 1] = g; o[j + 2] = bl; o[j + 3] = 255;
   }
@@ -280,6 +297,24 @@ export function Corrector({
                       );
                     })}
                   </div>
+                </div>
+                <div className="tool-group">
+                  <span className="toolbar-label">Вид (не меняет маску)</span>
+                  <label className="ctl">прозрачность
+                    <input className="slider" type="range" min={0.10} max={0.90} step={0.05} value={maskAlpha}
+                      onChange={(e) => setMaskAlpha(+e.target.value)} />
+                    <span className="slider-val">{maskAlpha.toFixed(2)}</span>
+                  </label>
+                  <label className="ctl">яркость
+                    <input className="slider" type="range" min={0.40} max={2.60} step={0.1} value={brightness}
+                      onChange={(e) => setBrightness(+e.target.value)} />
+                    <span className="slider-val">{brightness.toFixed(1)}</span>
+                  </label>
+                  <label className="switch-row">
+                    <span>CLAHE (контраст)</span>
+                    <button type="button" className={`switch${clahe ? " on" : ""}`} role="switch" aria-checked={clahe}
+                      onClick={() => setClahe((v) => !v)}><span className="knob" /></button>
+                  </label>
                 </div>
                 <div className="tool-group" style={{ display: "flex", gap: 8 }}>
                   <button type="button" className="btn ghost sm icon" title="Отменить" aria-label="Отменить"
