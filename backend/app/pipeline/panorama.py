@@ -1,10 +1,12 @@
 """Panorama product flow — tile a whole-section scan, classify ore-rich tiles,
 aggregate an ore-area-weighted section verdict, and stitch a display overlay.
 
-Ported from ``hakaton_nornikel/scripts/analyze_panorama.py::run_panorama``
-(classical path only — no U-Net). Torch is never imported here, at module top
-level or otherwise, so `import app.pipeline.panorama` works without torch
-installed.
+Ported from ``hakaton_nornikel/scripts/analyze_panorama.py::run_panorama``.
+Uses the trained talc U-Net per-tile when its weights are loadable (GPU or
+CPU), falling back to the classical detect_talc otherwise. Torch is never
+imported at this module's top level — only lazily, inside
+``loader.load_talc_unet()``/``talc_unet_mask()`` when the U-Net path actually
+runs — so `import app.pipeline.panorama` still works without torch installed.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from app.shlif.imageio import load_rgb
 from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
 from app.shlif.talc import detect_talc
+from app.shlif.talc_unet import talc_unet_mask
 from app.shlif.tiling import iter_tiles, tile_blend_weight, tile_grid
 from app.pipeline import loader
 from app.core import paths
@@ -58,8 +61,10 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     """Tile a panorama, classify ore-rich tiles, aggregate a section verdict, and
     stitch a display overlay. Returns a dict with `overlay` (RGB uint8, no banner)
     plus verdict fields. `cfg.tiling.tile` and `cfg.talc.detect_dark_frac` should
-    already be set by the caller. Classical matrix segmentation + classical talc
-    detection only (no GPU U-Net branch)."""
+    already be set by the caller. Matrix segmentation is always classical; talc
+    per tile comes from the trained U-Net when its weights are loadable, else
+    the classical detect_talc."""
+    unet = loader.load_talc_unet()
     Wt, Ht, factor = tile_grid(path, cfg.tiling)
     disp = load_rgb(path, max_pixels=display_mp)
     dh, dw = disp.shape[:2]
@@ -89,7 +94,11 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
         rgb = tile.rgb
         pre = preprocess(rgb, cfg.preprocess)
         matrix = segment_phases(pre, cfg.segment).labels == 0
-        talc = detect_talc(pre, matrix, cfg.talc)
+        if unet is not None:
+            model, device = unet
+            talc = talc_unet_mask(rgb, model, device, thr=None) & matrix
+        else:
+            talc = detect_talc(pre, matrix, cfg.talc)
         ore_px = int((~matrix).sum())
         ore_frac = ore_px / max(matrix.size, 1)
         talc_px += int(talc.sum()); matrix_px += int(matrix.sum())

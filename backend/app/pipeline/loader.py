@@ -17,6 +17,13 @@ def load_classifier():
     m = pickle.load(open(p, "rb"))
     return m["clf"], list(m["feature_names"]), [str(c) for c in m["classes"]]
 
+@lru_cache(maxsize=1)
+def load_talc_unet():
+    """Load the trained talc U-Net once -> (model, device), or None when the
+    checkpoint is absent, or torch/smp aren't installed (GPU is optional)."""
+    from app.shlif.talc_unet import build_talc_unet
+    return build_talc_unet(ckpt=str(settings.models_dir / "unet_talc.pt"))
+
 def gpu_available() -> bool:
     if os.environ.get("SHLIF_FORCE_CPU") == "1":
         return False
