@@ -92,11 +92,19 @@ Trained model artifacts are **not committed** (gitignored: `backend/models/`, `b
 | File | Enables | Without it |
 |---|---|---|
 | `classifier.pkl` | The ore-sort card (RandomForest, F1 0.84 / AUC 0.92) on close-ups **and** the section verdict on panoramas | Sort card shows a "classifier недоступен" note; panorama analyze returns a surfaced error |
-| `unet_ore.pt` *(optional)* | GPU-accelerated ore/matrix segmentation | Falls back to the classical multi-Otsu + Lab-colour segmenter (CPU, always available) |
-| `unet_talc.pt` *(optional)* | GPU-accelerated talc-zone detector | Falls back to the classical darkness/texture talc heuristic |
+| `unet_ore.pt` *(planned)* | GPU ore/matrix segmentation — **not yet wired in this milestone** | No behaviour change: the pipeline always runs the classical multi-Otsu + Lab-colour segmenter (CPU) |
+| `unet_talc.pt` *(planned)* | GPU talc-zone detector — **not yet wired in this milestone** | No behaviour change: the pipeline always runs the classical darkness/texture talc heuristic |
 
-`GET /api/health` reports which of these are actually loaded (`"models": {"classifier": bool,
-"unet_ore": bool, "unet_talc": bool}`) alongside `"gpu": bool`.
+> **U-Net wiring is deferred.** The close-up and panorama pipelines run the **classical path
+> unconditionally** in this build. Dropping `unet_ore.pt` / `unet_talc.pt` into `backend/models/`
+> today only flips their `/api/health` flags to `true` — it does **not** change segmentation
+> output. The `analyze_image` hooks for injecting U-Net masks exist (`backend/app/shlif/analyze.py`,
+> params `ore_mask`/`talc_mask`) but no caller populates them yet; GPU inference wiring is planned
+> follow-up work. Only `classifier.pkl` affects results today (the sort card + panorama verdict).
+
+`GET /api/health` reports which of these files are **present on disk** (`"models": {"classifier":
+bool, "unet_ore": bool, "unet_talc": bool}`, an existence check — not a load/deserialize check)
+alongside `"gpu": bool`.
 
 Source of the trained artifacts: the origin hackathon repo `hakaton_nornikel`, e.g.
 `hakaton_nornikel/out/classifier.pkl` — training scripts stay there, only the runtime pipeline is
@@ -107,11 +115,14 @@ vendored here (`backend/app/shlif/`, see `backend/app/shlif/VENDORED.md`).
 The backend never hard-requires a GPU. `app.pipeline.loader.gpu_available()` checks
 `torch.cuda.is_available()` at runtime (a failed/missing torch import is treated as "no GPU");
 `SHLIF_FORCE_CPU=1` (set by the Compose override) short-circuits it to `False` regardless of
-hardware. Code paths that can use a U-Net check for the corresponding `.pt` checkpoint at load
-time and silently fall back to the classical (non-GPU) implementation when it's absent — so the
-whole pipeline runs end-to-end on CPU-only hardware with the classical methods, and picks up GPU
-acceleration automatically when both a CUDA device and the matching checkpoint are present (e.g.
-redeployed on the organizer's L4 VM).
+hardware, and `torch` is an optional import throughout — `import app.shlif` and the whole test
+suite run with torch absent. In **this** milestone the analysis pipelines run the **classical
+(CPU) methods unconditionally**, so the service works end-to-end on CPU-only hardware with no
+model beyond `classifier.pkl`. The GPU U-Net path (auto-detect a CUDA device + the matching `.pt`
+checkpoint, branch into U-Net inference, else fall back to classical) is scaffolded — `gpu_available()`,
+the `/api/health` model flags, and the `analyze_image` `ore_mask`/`talc_mask` hooks are all in
+place — but the inference wiring itself is planned follow-up, not yet active (see the Models note
+above).
 
 ## Architecture
 
