@@ -1,8 +1,10 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAnalyze, useJob } from "@/lib/api/hooks";
 import { reportUrl } from "@/lib/api/client";
 import type { Verdict } from "@/lib/api/types";
+import { buildJobQuery, parseJobParams } from "@/lib/jobUrl";
 import { VerdictPanel } from "@/components/verdict/VerdictPanel";
 import { Corrector } from "@/components/corrector/Corrector";
 import { Welcome } from "@/components/Welcome";
@@ -15,13 +17,36 @@ const STATUS: Record<string, [string, string]> = {
   done: ["done", "готово"], error: ["error", "ошибка"],
 };
 
-export default function Home() {
+function Home() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [restored] = useState(() => parseJobParams(searchParams));
+
   const [file, setFile] = useState<File | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [jobId, setJobId] = useState<string | null>(() => restored.jobId);
+  const [startedAt, setStartedAt] = useState<number | null>(() => restored.startedAt ?? (restored.jobId ? Date.now() : null));
   const [vOverride, setVOverride] = useState<Verdict | null>(null);
   const analyze = useAnalyze();
   const job = useJob(jobId);
+
+  // Держим ссылку в актуальном состоянии: перезагрузка страницы должна вернуть к тому же
+  // анализу, а не к пустому экрану загрузки.
+  useEffect(() => {
+    const qs = buildJobQuery(jobId, startedAt);
+    if (qs === searchParams.toString()) return;
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [jobId, startedAt, pathname, router, searchParams]);
+
+  // Job, восстановленный из ссылки, мог устареть или быть удалён на сервере — откатываемся
+  // на экран загрузки вместо того, чтобы зависнуть на бесконечном "Анализ снимка…".
+  useEffect(() => {
+    if (job.isError && jobId) {
+      setJobId(null);
+      setStartedAt(null);
+      setVOverride(null);
+    }
+  }, [job.isError, jobId]);
 
   function runAnalyze(f: File) {
     setFile(f);
@@ -100,5 +125,13 @@ export default function Home() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <Home />
+    </Suspense>
   );
 }
