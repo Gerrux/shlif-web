@@ -93,11 +93,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .topbar .crumb { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .topbar h1 { margin: 3px 0 0; font-size: 21px; font-weight: 700; letter-spacing: -0.02em; }
 .logo {
-  width: 38px; height: 38px; border-radius: 9px; flex-shrink: 0;
-  background: linear-gradient(155deg, oklch(72% 0.13 72), oklch(50% 0.12 55));
-  display: grid; place-items: center; color: oklch(24% 0.05 55);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.32), 0 4px 12px oklch(50% 0.12 55 / 0.28);
-  font-size: 19px; line-height: 1;
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  font-size: 32px; line-height: 1;
 }
 
 /* ---- Переключатель темы ---- */
