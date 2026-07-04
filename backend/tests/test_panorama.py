@@ -38,13 +38,17 @@ def test_panorama_does_not_mutate_shared_config(tmp_path):
 @pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
 def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
     """When loader.load_talc_unet() has weights, _run_panorama's per-tile talc
-    decision must come from the U-Net (mask & matrix), not the classical
-    detect_talc. Checks the gate directly (was the U-Net actually called, and
-    did the classical detector never run) rather than a downstream metric:
-    the reported verdict's talc_frac comes from _assemble_masks, which is
-    classical-only regardless of the talc U-Net's availability (see this
-    module's docstring) — so a numeric assertion on r["talc_frac"] wouldn't
-    actually exercise this gate."""
+    decision (which drives the display overlay + ore-density weighting) must
+    come from the U-Net, not the classical detect_talc.
+
+    This checks only that path, not a ban on detect_talc anywhere in
+    analyze_panorama: _assemble_masks (which produces the *reported* verdict)
+    is classical-only regardless of U-Net availability (see this module's
+    docstring — wiring U-Net into _assemble_masks too, mirroring
+    shlif.analyze.analyze_image's ore_mask pattern, is a reasonable follow-up
+    but is new, unreviewed work, not something to fold into this merge) — so
+    it legitimately still calls detect_talc, and a blanket ban would fail for
+    a reason unrelated to what this test is actually checking."""
     img = (np.random.default_rng(3).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
     img[100:400, 100:400] = 210
     p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
@@ -56,10 +60,6 @@ def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
         return np.ones(rgb.shape[:2], bool)
     monkeypatch.setattr(panorama.loader, "load_talc_unet", lambda: ("fake-model", "cpu"))
     monkeypatch.setattr(panorama, "talc_unet_mask", fake_talc_unet)
-
-    def boom(*a, **k):
-        raise AssertionError("classical detect_talc must not run when the U-Net is available")
-    monkeypatch.setattr(panorama, "detect_talc", boom)
 
     r = panorama.analyze_panorama(str(p), cfg, "unettest")
     assert r["mode"] == "panorama"
