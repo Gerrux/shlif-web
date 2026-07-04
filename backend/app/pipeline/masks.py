@@ -90,14 +90,17 @@ def persist_editor_artifacts(jid: str, r: dict) -> None:
 _UNC_MAX_SIDE = 1024  # cap the ensemble-segmentation resolution — the fraction is scale-robust
 
 
-def uncertainty_for_editor(rgb: np.ndarray, cfg) -> dict:
+def uncertainty_for_editor(rgb: np.ndarray, cfg, on_step=None) -> dict:
     """Ensemble-perturbation uncertainty, computed on a downscaled copy for
     speed and the confidence map resized back to `rgb`'s own frame. Shared by
-    closeup and panorama so both report confidence/low_conf_zones the same way."""
+    closeup and panorama so both report confidence/low_conf_zones the same way.
+    `on_step`, if given, is forwarded verbatim to `ensemble_uncertainty` — this
+    function does no progress-fraction scaling itself since callers (closeup,
+    panorama) need different scaling for the same shared computation."""
     h, w = rgb.shape[:2]
     s = min(1.0, _UNC_MAX_SIDE / max(h, w))
     small = cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA) if s < 1 else rgb
-    u = ensemble_uncertainty(small, cfg)
+    u = ensemble_uncertainty(small, cfg, on_step=on_step)
     conf = cv2.resize(u["confidence"], (w, h), interpolation=cv2.INTER_LINEAR)
     return {"confidence": conf, "undetermined_fraction": u["undetermined_fraction"],
             "low_conf_zones": find_low_conf_zones(u)}
