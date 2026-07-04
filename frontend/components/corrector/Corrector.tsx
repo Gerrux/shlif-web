@@ -14,9 +14,11 @@ import {
   IconBrush, IconEye, IconEyeOff,
 } from "@/components/icons";
 import { applyBrightness, applyClahe } from "@/lib/mask/enhance";
+import { darkSegmentsMask } from "@/lib/mask/darkpercent";
 
 const PHASE_RGB: Record<number, [number, number, number]> = { 1: [150, 160, 182], 2: [201, 180, 95] };
 const TALC_RGB: [number, number, number] = [79, 143, 240];
+const DARK_RGB: [number, number, number] = [200, 60, 220];
 const TOOLS: [Tool, string][] = [
   ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["threshold", "Тёмные области"], ["pan", "Рука"],
 ];
@@ -68,6 +70,9 @@ export function Corrector({
   const maskAlphaRef = useRef(maskAlpha); maskAlphaRef.current = maskAlpha;
   const [brightness, setBrightness] = useState(1.0);
   const [clahe, setClahe] = useState(false);
+  const [darkFrac, setDarkFrac] = useState(45);
+  const [showDarkPreview, setShowDarkPreview] = useState(false);
+  const darkMaskRef = useRef<Uint8Array | null>(null);
   const [grabbing, setGrabbing] = useState(false);
   const [sideTab, setSideTab] = useState<"edit" | "report">("edit");
   const zp = useZoomPan();
@@ -111,6 +116,23 @@ export function Corrector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brightness, clahe]);
 
+  // Слой-подсказка «тёмные сегменты»: превью пересчитывается только пока включено;
+  // применение в маску — отдельная явная кнопка (applyDarkSegments), не автоматически.
+  useEffect(() => {
+    if (!state || !darkRef.current || !showDarkPreview) { darkMaskRef.current = null; requestDraw(); return; }
+    darkMaskRef.current = darkSegmentsMask(darkRef.current, state.phaseMap, state.talc, darkFrac / 100);
+    if (!strokeRef.current) { srcRef.current = { pm: state.phaseMap, tc: state.talc }; requestDraw(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [darkFrac, showDarkPreview, state?.phaseMap, state?.talc]);
+
+  function applyDarkSegments() {
+    if (!state || !darkRef.current) return;
+    const mask = darkSegmentsMask(darkRef.current, state.phaseMap, state.talc, darkFrac / 100);
+    const idxs: number[] = [];
+    for (let i = 0; i < mask.length; i++) if (mask[i]) idxs.push(i);
+    setState(applyTalc(state, idxs, true));
+  }
+
   function composePixel(pm: Uint8Array, tc: Uint8Array, i: number) {
     const b = (enhancedRGBA.current ?? baseRGBA.current)!, o = outRef.current!.data; const j = i * 4;
     let r = b[j], g = b[j + 1], bl = b[j + 2];
@@ -121,6 +143,10 @@ export function Corrector({
     }
     if (tc[i] && v.talc) {
       r = (1 - a) * r + a * TALC_RGB[0]; g = (1 - a) * g + a * TALC_RGB[1]; bl = (1 - a) * bl + a * TALC_RGB[2];
+    }
+    const dm = darkMaskRef.current;
+    if (dm && dm[i] && !tc[i]) {
+      r = 0.5 * r + 0.5 * DARK_RGB[0]; g = 0.5 * g + 0.5 * DARK_RGB[1]; bl = 0.5 * bl + 0.5 * DARK_RGB[2];
     }
     o[j] = r; o[j + 1] = g; o[j + 2] = bl; o[j + 3] = 255;
   }
@@ -315,6 +341,20 @@ export function Corrector({
                     <button type="button" className={`switch${clahe ? " on" : ""}`} role="switch" aria-checked={clahe}
                       onClick={() => setClahe((v) => !v)}><span className="knob" /></button>
                   </label>
+                </div>
+                <div className="tool-group">
+                  <span className="toolbar-label">Слои-подсказки (превью → применить в маску)</span>
+                  <label className="ctl">тёмные сегменты, % матрицы
+                    <input className="slider" type="range" min={10} max={70} step={5} value={darkFrac}
+                      onChange={(e) => setDarkFrac(+e.target.value)} />
+                    <span className="slider-val">{darkFrac}%</span>
+                  </label>
+                  <label className="switch-row">
+                    <span>Показать превью</span>
+                    <button type="button" className={`switch${showDarkPreview ? " on" : ""}`} role="switch" aria-checked={showDarkPreview}
+                      onClick={() => setShowDarkPreview((v) => !v)}><span className="knob" /></button>
+                  </label>
+                  <button type="button" className="btn ghost sm" onClick={applyDarkSegments}>+ Применить к тальку</button>
                 </div>
                 <div className="tool-group" style={{ display: "flex", gap: 8 }}>
                   <button type="button" className="btn ghost sm icon" title="Отменить" aria-label="Отменить"
