@@ -22,6 +22,7 @@ from app.shlif.imageio import load_rgb
 from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
 from app.shlif.talc import detect_talc
+from app.shlif.ore_unet import ore_unet_mask
 from app.shlif.tiling import iter_tiles, tile_blend_weight, tile_grid
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 from app.pipeline import loader
@@ -70,6 +71,10 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     # panoramas where segmentation reads every tile as ore-bearing)
     ore_pct = float(getattr(cfg.tiling, "ore_density_pct", ORE_DENSITY_PCT))
     bright_thr = float(np.percentile(cv2.cvtColor(disp, cv2.COLOR_RGB2GRAY), ore_pct))
+    # trained ore/matrix U-Net when available (IoU 0.975 vs classical 0.81);
+    # None (missing checkpoint or torch/smp) -> classical segment_phases fallback
+    ore_bundle = loader.load_ore_unet()
+    ore_source = "unet" if ore_bundle is not None else "classical"
 
     base = disp.astype(np.float32)
     # Feathered stitch: accumulate weight*colour per tile and normalise, so
@@ -93,7 +98,11 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
             continue
         rgb = tile.rgb
         pre = preprocess(rgb, cfg.preprocess)
-        matrix = segment_phases(pre, cfg.segment).labels == 0
+        if ore_bundle is not None:
+            ore_model, ore_device = ore_bundle
+            matrix = ~ore_unet_mask(rgb, ore_model, ore_device)
+        else:
+            matrix = segment_phases(pre, cfg.segment).labels == 0
         talc = detect_talc(pre, matrix, cfg.talc)
         ore_px = int((~matrix).sum())
         ore_frac = ore_px / max(matrix.size, 1)
@@ -158,6 +167,7 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
         "seconds": time.time() - t0, "factor": factor,
         "undetermined_fraction": undet_weighted_sum / max(undet_px_total, 1),
         "low_conf_zones": low_conf_zones,
+        "ore_source": ore_source,
     }
 
 
@@ -181,5 +191,5 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
                                 "undetermined_fraction": r["undetermined_fraction"]}},
         "overlay_url": f"/api/images/{jid}.jpg",
         "n_ore": r["n_ore"], "n_tiles": r["n_tiles"], "talc_frac": r["talc_frac"],
-        "low_conf_zones": r["low_conf_zones"],
+        "low_conf_zones": r["low_conf_zones"], "ore_source": r["ore_source"],
     }

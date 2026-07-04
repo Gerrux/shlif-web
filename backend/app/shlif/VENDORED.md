@@ -15,4 +15,8 @@ origin) with runtime improvements borrowed from peer solutions:
 - `talc_unet.py` — `resolve_threshold` adaptive talc-map cascade; `talc_unet_mask(thr=None)`.
 - `analyze.py` — reports `talc_share_est` in metrics.
 - new `uncertainty.py` — ensemble-perturbation confidence / undetermined_fraction / zones.
+- new `ore_unet.py` — guarded loader/inference for the trained ore/matrix U-Net
+  (`unet_ore.pt`), ported from `hakaton_nornikel/scripts/sam2_prelabel.py::build_unet` /
+  `unet_ore_decision`. Not present as a standalone module in origin (origin's version lives
+  inline in a CLI script); wired into `panorama.py`'s ore/matrix gate with a classical fallback.
 When syncing origin, port these forward rather than overwriting from the pinned commit.
