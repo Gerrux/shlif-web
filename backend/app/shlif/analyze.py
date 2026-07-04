@@ -1,8 +1,12 @@
 """End-to-end analysis of a single (close-up) image → phases, metrics, verdict.
 
-The intergrowth split here is a *first-cut proxy*: sulfide pixels close to
-magnetite are "fine" (densely laced), solid sulfide away from magnetite is
-"normal". A texture/GLCM classifier per sulfide grain replaces this proxy next.
+The intergrowth split is by sulfide **grain size** (organiser expert criterion,
+2026-07-04): ore is ground before flotation, and it is the *size* of the sulfide
+grains — not the % replacement by gangue — that sets how cleanly they liberate.
+Coarse, blocky sulfides survive comminution as free particles → рядовая; fine,
+laced sulfide networks stay locked in the non-ore matrix → труднообогатимая. The
+texture/granulometry RF classifier is the primary sort; this rule card is the
+interpretable estimate shown alongside it.
 """
 
 from __future__ import annotations
@@ -26,28 +30,40 @@ class Analysis:
     masks: dict = field(default_factory=dict)
 
 
-def _intergrowth_split(sulfide: np.ndarray, magnetite: np.ndarray, dist_px: int):
-    """Split sulfide into (normal, fine) by proximity to magnetite."""
+def _liberation_split(sulfide: np.ndarray, lib_px: int):
+    """Split sulfide into (coarse, fine) by GRAIN SIZE — the liberation criterion.
+
+    A morphological opening with a disk of radius ``lib_px`` (the grind/liberation
+    grain size) keeps only sulfide features at least ~2*lib_px thick: coarse,
+    blocky grains that liberate as free particles on grinding (рядовая marker).
+    Thin, laced sulfide collapses under the opening → "fine", i.e. grains that stay
+    locked in the non-ore matrix after comminution (труднообогатимая marker).
+
+    Empirically (1109 imgs) this is what separates the classes: coarse-share
+    (granulometry) drives ordinary-vs-hard, while % magnetite replacement is
+    near-useless (AUC 0.51). Replaces the old magnetite-proximity proxy.
+    """
     if not sulfide.any():
         z = np.zeros_like(sulfide)
         return z, z
-    non_mag = (~magnetite).astype(np.uint8)
-    dist = cv2.distanceTransform(non_mag, cv2.DIST_L2, 3)
-    fine = sulfide & (dist <= float(dist_px))
-    normal = sulfide & ~fine
-    return normal, fine
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * lib_px + 1, 2 * lib_px + 1))
+    coarse = cv2.morphologyEx(sulfide.astype(np.uint8), cv2.MORPH_OPEN, k).astype(bool) & sulfide
+    fine = sulfide & ~coarse
+    return coarse, fine
 
 
-def verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px: int = 12) -> dict:
+def verdict_from_masks(sulfide, magnetite, matrix, talc, cfg) -> dict:
     """Phase-composition verdict from (already-decided) phase masks + talc overlay.
     Returns {ore_class, text, metrics}. Shared by analyze_image and the web recompute."""
+    rule = cfg.rule
     talc_frac = talc_fraction(talc)
-    normal, fine = _intergrowth_split(sulfide, magnetite, dist_px)
+    long_side = max(sulfide.shape)
+    lib_px = max(2, int(round(float(getattr(rule, "liberation_radius_frac", 0.01)) * long_side)))
+    normal, fine = _liberation_split(sulfide, lib_px)  # normal = coarse/liberated grains
     sulf_area = float(sulfide.sum())
     fine_share = float(fine.sum()) / sulf_area if sulf_area > 0 else 0.0
     normal_share = 1.0 - fine_share
 
-    rule = cfg.rule
     talc_thr = float(rule.talc_threshold)
     dom_thr = float(rule.dominance_threshold)
     if talc_frac > talc_thr:
@@ -74,7 +90,7 @@ def verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px: int = 12)
             "metrics": metrics, "normal": normal, "fine": fine}
 
 
-def analyze_image(rgb: np.ndarray, cfg, dist_px: int = 12, detect_talc_flag: bool = False,
+def analyze_image(rgb: np.ndarray, cfg, detect_talc_flag: bool = False,
                   ore_mask: np.ndarray | None = None,
                   talc_mask: np.ndarray | None = None) -> Analysis:
     """Run the full close-up pipeline and apply the expert rule.
@@ -123,7 +139,7 @@ def analyze_image(rgb: np.ndarray, cfg, dist_px: int = 12, detect_talc_flag: boo
         talc = detect_talc(pre, matrix, cfg.talc)
     else:
         talc = np.zeros(rgb.shape[:2], dtype=bool)
-    v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px)
+    v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg)
     ore, text, metrics, normal, fine = v["ore_class"], v["text"], v["metrics"], v["normal"], v["fine"]
 
     # Independent talc-share proxy: dispersed medium-dark grey phase inside the
@@ -151,10 +167,13 @@ def _verdict_text(ore: str, m: dict) -> str:
     name = phases.ORE_CLASS_RU[ore]
     talc = 100 * m["talc_frac"]
     fine = 100 * m["fine_share"]
+    coarse = 100 * m["normal_share"]
     if ore == phases.ORE_TALCOSE:
-        return f"Классифицирована как {name}: тальк {talc:.1f}%, преобладание тонких срастаний {fine:.0f}%."
+        return f"Классифицирована как {name}: тальк {talc:.1f}%, мелких (запертых) сульфидов {fine:.0f}%."
     if ore == phases.ORE_HARD:
-        return f"Классифицирована как {name}: тальк {talc:.1f}%, преобладание тонких срастаний {fine:.0f}%."
+        return (f"Классифицирована как {name}: тальк {talc:.1f}%, преобладают мелкие сульфиды "
+                f"{fine:.0f}% — заперты в нерудной матрице, плохо раскрываются при измельчении.")
     if ore == phases.ORE_ORDINARY:
-        return f"Классифицирована как {name}: тальк {talc:.1f}%, преобладание обычных срастаний {100 - fine:.0f}%."
-    return f"Требует проверки: тальк {talc:.1f}%, тонкие срастания {fine:.0f}% (низкая уверенность)."
+        return (f"Классифицирована как {name}: тальк {talc:.1f}%, преобладают крупные сульфиды "
+                f"{coarse:.0f}% — свободны после измельчения.")
+    return f"Требует проверки: тальк {talc:.1f}%, мелкие сульфиды {fine:.0f}% (низкая уверенность)."

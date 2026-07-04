@@ -22,10 +22,10 @@
   --brand-tint: oklch(97.3% 0.020 70);
   --brand-ink:  oklch(44% 0.110 58);
   /* Фазовые маски — семантическое ядро домена */
-  --phase-normal:      oklch(60% 0.150 152);   /* обычные срастания — зелёный */
+  --phase-normal:      oklch(60% 0.150 152);   /* крупные (свободные) сульфиды — зелёный */
   --phase-normal-soft: oklch(94.5% 0.052 152);
   --phase-normal-ink:  oklch(42% 0.130 152);
-  --phase-fine:      oklch(57% 0.200 26);       /* тонкие срастания — красный */
+  --phase-fine:      oklch(57% 0.200 26);       /* мелкие (запертые) сульфиды — красный */
   --phase-fine-soft: oklch(95.5% 0.045 26);
   --phase-fine-ink:  oklch(47% 0.190 27);
   --phase-talc:      oklch(56% 0.150 254);      /* тальк — синий */

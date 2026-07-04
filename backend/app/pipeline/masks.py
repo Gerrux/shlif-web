@@ -14,8 +14,8 @@ def phase_label_map(sulfide: np.ndarray, magnetite: np.ndarray) -> np.ndarray:
 def split_phase_map(pm: np.ndarray):
     return pm == phases.SULFIDE, pm == phases.MAGNETITE, pm == phases.MATRIX
 
-def verdict_from_masks_dict(sulfide, magnetite, matrix, talc, cfg, dist_px: int = 12) -> dict:
-    v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px)
+def verdict_from_masks_dict(sulfide, magnetite, matrix, talc, cfg) -> dict:
+    v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg)
     return {"ore_class": v["ore_class"], "text": v["text"], "metrics": v["metrics"]}
 
 def build_superpixel_map(rgb: np.ndarray, n_segments: int = 600) -> np.ndarray:

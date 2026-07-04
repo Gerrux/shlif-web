@@ -3,8 +3,8 @@ import { oreRu } from "@/lib/ore";
 const ROWS: [string, string, string][] = [
   ["Доля талька", "talc_frac", "var(--phase-talc-ink)"],
   ["Тальк · оценка доли", "talc_share_est", "var(--phase-talc-ink)"],
-  ["Тонкие срастания", "fine_share", "var(--phase-fine-ink)"],
-  ["Обычные срастания", "normal_share", "var(--phase-normal-ink)"],
+  ["Мелкие сульфиды · заперты", "fine_share", "var(--phase-fine-ink)"],
+  ["Крупные сульфиды · свободны", "normal_share", "var(--phase-normal-ink)"],
   ["Доля сульфидов", "sulfide_frac", "var(--text)"],
 ];
 export function PhaseBars({ verdict }: { verdict: Verdict }) {
@@ -29,7 +29,7 @@ export function PhaseBars({ verdict }: { verdict: Verdict }) {
             <span className="v" style={{ color: "var(--muted)" }}>{(undet * 100).toFixed(1)}%</span></div>
         ) : null}
         {normal + fine > 0 ? (
-          <div className="stackbar" title="обычные / тонкие срастания">
+          <div className="stackbar" title="крупные (свободные) / мелкие (запертые) сульфиды">
             <span style={{ width: `${normal}%`, background: "var(--phase-normal)" }} />
             <span style={{ width: `${fine}%`, background: "var(--phase-fine)" }} />
           </div>
