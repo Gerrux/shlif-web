@@ -56,15 +56,26 @@ def _is_empty(rgb: np.ndarray, bright_frac: float) -> bool:
     return float((v > thr).mean()) < bright_frac
 
 
-def iter_tiles(path: str | Path, cfg) -> Iterator[Tile]:
+def load_working_array(path: str | Path, cfg) -> np.ndarray:
+    """Decode the image once at the tiling working scale (memory-safe draft
+    decode above ``cfg.max_pixels``). Shared by `iter_tiles` and any caller
+    that also needs the full working-scale canvas (e.g. a display copy), so
+    a gigapixel file is only ever decoded once per job."""
+    return load_rgb(path, max_pixels=int(cfg.max_pixels))
+
+
+def iter_tiles(path: str | Path, cfg, arr: np.ndarray | None = None) -> Iterator[Tile]:
     """Yield overlapping tiles across a (possibly gigapixel) image.
 
     ``cfg`` is the ``tiling`` config block. Empty tiles are yielded with
     ``empty=True`` (and no heavy work done) unless ``skip_empty`` is false.
+    Pass a pre-loaded ``arr`` (from :func:`load_working_array`) to avoid
+    decoding the image twice when the caller also needs the full canvas.
     """
     w, h = image_size(path)
     factor = decode_factor(w, h, int(cfg.max_pixels))
-    arr = load_rgb(path, max_pixels=int(cfg.max_pixels))
+    if arr is None:
+        arr = load_working_array(path, cfg)
     H, W = arr.shape[:2]
 
     tile = int(cfg.tile)
@@ -86,3 +97,16 @@ def tile_grid(path: str | Path, cfg) -> tuple[int, int, int]:
     w, h = image_size(path)
     factor = decode_factor(w, h, int(cfg.max_pixels))
     return w // factor, h // factor, factor
+
+
+def tile_core_bounds(x: int, y: int, tw: int, th: int, step: int, W: int, H: int) -> tuple[int, int, int, int]:
+    """The non-overlapping "core" region a tile contributes when reassembling
+    one continuous canvas from overlapping tiles: ``[x, x+step)`` on each
+    axis, except the last tile in a row/column, which extends all the way to
+    the true canvas edge (the stride does not have to evenly divide the
+    canvas). Consecutive tiles' cores are exactly contiguous (the next tile
+    always starts at ``x+step``), so summing every tile's core covers the
+    canvas once, with no gap and no overlap."""
+    cx1 = W if x + tw >= W else min(x + step, W)
+    cy1 = H if y + th >= H else min(y + step, H)
+    return x, y, cx1, cy1
