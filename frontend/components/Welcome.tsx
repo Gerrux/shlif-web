@@ -24,7 +24,6 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
       <div className="welcome-bg" />
       <div className="welcome-scrim" />
       <div className="welcome-inner">
-        <div className="welcome-badge"><span className="ping" />ИИ-классификация полированных шлифов</div>
         <h1 className="welcome-title">
           <span className="wm">DATA&nbsp;FORCE</span>
           <span className="rocket">🚀</span>
