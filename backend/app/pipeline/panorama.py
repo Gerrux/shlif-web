@@ -259,7 +259,7 @@ def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
         raise RuntimeError("classifier.pkl required for panorama sort")
     clf, feat, classes = bundle
 
-    report(0.03, "загрузка изображения")
+    report(0.05, "загрузка изображения")
     arr = load_working_array(path, cfg.tiling)
     H, W = arr.shape[:2]
 

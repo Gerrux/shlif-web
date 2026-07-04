@@ -124,8 +124,11 @@ def count_tiles(path: str | Path, cfg) -> int:
 Приближённо (не учитывает отбрасывание тайлов `<8px` на краю) — для прогресс-бара точность до
 одного тайла не важна.
 
-**`backend/app/pipeline/panorama.py`** — `_run_panorama(..., on_progress=None)` и
-`analyze_panorama(path, cfg, jid, on_progress=None)` пробрасывают колбэк:
+**`backend/app/pipeline/panorama.py`** — *(Устарело на момент реализации: между написанием этой
+спеки и стартом воркtree панорама уже была перестроена конкурентной работой в два тайловых цикла —
+`_assemble_masks` + `_run_panorama` — вместо одного. Фактическая, реализованная и прошедшая ревью
+схема прогресса задокументирована в plan-drift-заметке `docs/superpowers/plans/2026-07-04-analysis-progress-ui.md`,
+раздел «Task 4»; ориентируйтесь на неё, не на текст ниже.)*
 
 - `report(0.05, "загрузка модели")` после `loader.load_talc_unet()`/`loader.load_ore_unet()`.
 - Внутри `for tile in iter_tiles(...)`, после `n_tiles += 1`:
