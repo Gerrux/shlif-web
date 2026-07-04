@@ -246,6 +246,7 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
     assembled = _assemble_masks(path, cfg, arr)
     verdict = masks.verdict_from_masks_dict(
         assembled["sulfide"], assembled["magnetite"], assembled["matrix"], assembled["talc"], cfg)
+    intergrowth = verdict.pop("intergrowth")
     verdict["metrics"]["talc_share_est"] = float(assembled["dg"].mean())
 
     run = _run_panorama(path, clf, feat, classes, cfg, arr)
@@ -261,13 +262,14 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
     talc_small = cv2.resize(assembled["talc"].astype(np.uint8), (ew, eh),
                             interpolation=cv2.INTER_NEAREST) > 0
     phase_small = masks.phase_label_map(sulfide_small, magnetite_small)
+    intergrowth_small = cv2.resize(intergrowth, (ew, eh), interpolation=cv2.INTER_NEAREST)
     # confidence MAP for the editor overlay only (single downscaled pass);
     # low_conf_zones/undetermined_fraction above use _run_panorama's finer,
     # per-tile aggregation instead of this call's own (coarser) values.
     unc = masks.uncertainty_for_editor(edit, cfg)
 
     masks.persist_editor_artifacts(jid, {
-        "phase_map": phase_small, "talc": talc_small,
+        "phase_map": phase_small, "talc": talc_small, "intergrowth": intergrowth_small,
         "superpixels": masks.build_superpixel_map(edit),
         "darkness": masks.build_darkness_map(edit),
         "confidence": unc["confidence"],

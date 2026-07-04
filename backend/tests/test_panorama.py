@@ -36,6 +36,22 @@ def test_panorama_does_not_mutate_shared_config(tmp_path):
 
 
 @pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
+def test_panorama_persists_intergrowth_mask(tmp_path, monkeypatch):
+    from app.core import paths as core_paths
+    from app.pipeline import masks as M
+    monkeypatch.setattr(core_paths.settings, "data_dir", tmp_path)
+    img = (np.random.default_rng(4).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+    img[100:400, 100:400] = 210
+    p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
+    cfg = loader.get_config()
+    r = panorama.analyze_panorama(str(p), cfg, "igtest")
+    assert "intergrowth" not in r["verdict"]  # popped before returning, must never leak to the JSON verdict
+    ig = M.decode_png_gray((core_paths.masks_dir("igtest") / "intergrowth.png").read_bytes())
+    assert ig.shape == (r["size"][1], r["size"][0])
+    assert set(np.unique(ig)) <= {0, 1, 2}
+
+
+@pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
 def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
     """When loader.load_talc_unet() has weights, _run_panorama's per-tile talc
     decision (which drives the display overlay + ore-density weighting) must
