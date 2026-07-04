@@ -99,14 +99,28 @@ def tile_grid(path: str | Path, cfg) -> tuple[int, int, int]:
     return w // factor, h // factor, factor
 
 
-def tile_core_bounds(x: int, y: int, tw: int, th: int, step: int, W: int, H: int) -> tuple[int, int, int, int]:
-    """The non-overlapping "core" region a tile contributes when reassembling
-    one continuous canvas from overlapping tiles: ``[x, x+step)`` on each
-    axis, except the last tile in a row/column, which extends all the way to
-    the true canvas edge (the stride does not have to evenly divide the
-    canvas). Consecutive tiles' cores are exactly contiguous (the next tile
-    always starts at ``x+step``), so summing every tile's core covers the
-    canvas once, with no gap and no overlap."""
-    cx1 = W if x + tw >= W else min(x + step, W)
-    cy1 = H if y + th >= H else min(y + step, H)
-    return x, y, cx1, cy1
+def axis_tile_starts(size: int, tile: int, step: int) -> list[int]:
+    """Replicate `iter_tiles`' 1-D loop (`range(0, max(1, size-1), step)`) and
+    its tail-tile skip filter (clipped extent < 8px), returning the actual
+    sequence of tile starts that will be yielded along one axis. Both
+    `iter_tiles` and `axis_core_bounds` derive tile positions from this one
+    function, so "the next tile's start" and "the next tile the iterator
+    actually yields" can never disagree."""
+    starts = []
+    for x in range(0, max(1, size - 1), step):
+        if min(tile, size - x) < 8:
+            continue
+        starts.append(x)
+    return starts
+
+
+def axis_core_bounds(size: int, tile: int, step: int) -> dict[int, int]:
+    """For each tile start along one axis, the non-overlapping core end it
+    contributes when reassembling one continuous canvas: the next tile's
+    start, or `size` for the last tile (no next tile exists to claim the
+    remainder). Consecutive cores are exactly contiguous by construction —
+    this is what makes summing every tile's core cover the canvas once, with
+    no gap and no overlap, regardless of how the stride divides the canvas
+    or how many tail tiles independently reach the true edge."""
+    starts = axis_tile_starts(size, tile, step)
+    return {s: (starts[i + 1] if i + 1 < len(starts) else size) for i, s in enumerate(starts)}
