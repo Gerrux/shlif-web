@@ -20,7 +20,7 @@ const PHASE_RGB: Record<number, [number, number, number]> = { 1: [150, 160, 182]
 const TALC_RGB: [number, number, number] = [79, 143, 240];
 const DARK_RGB: [number, number, number] = [200, 60, 220];
 const TOOLS: [Tool, string][] = [
-  ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["threshold", "Тёмные области"], ["pan", "Рука"],
+  ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["pan", "Рука"],
 ];
 type LayerDef = { key: Layer; ru: string; sw: string; overlay: "sulfide" | "magnetite" | "talc" | null };
 const LAYERS: LayerDef[] = [
@@ -62,7 +62,6 @@ export function Corrector({
   const pendingFull = useRef(false);
   const pendingIdx = useRef<number[]>([]);
   const [state, setState] = useState<CorrectorState | null>(null);
-  const [thr, setThr] = useState(60);
   const [saving, setSaving] = useState(false);
   const [vis, setVis] = useState<Vis>({ sulfide: true, magnetite: true, talc: true });
   const visRef = useRef(vis); visRef.current = vis;
@@ -73,6 +72,7 @@ export function Corrector({
   const [darkFrac, setDarkFrac] = useState(45);
   const [showDarkPreview, setShowDarkPreview] = useState(false);
   const darkMaskRef = useRef<Uint8Array | null>(null);
+  const [spAction, setSpAction] = useState<"Ставить" | "Убирать">("Ставить");
   const [grabbing, setGrabbing] = useState(false);
   const [sideTab, setSideTab] = useState<"edit" | "report">("edit");
   const zp = useZoomPan();
@@ -215,11 +215,8 @@ export function Corrector({
       requestDraw(idxs);
     } else if (state.tool === "superpixel" && spRef.current) {
       const idxs = cellIndices(spRef.current, cy * w + cx);
-      setState(state.layer === "talc" ? applyTalc(state, idxs, true) : applyPhase(state, idxs, state.layer));
-    } else if (state.tool === "threshold" && darkRef.current) {
-      const idxs: number[] = [];
-      for (let i = 0; i < w * h; i++) if (darkRef.current[i] <= thr && state.phaseMap[i] === 0) idxs.push(i);
-      setState(applyTalc(state, idxs, true));
+      const setting = spAction === "Ставить";
+      setState(state.layer === "talc" ? applyTalc(state, idxs, setting) : applyPhase(state, idxs, setting ? state.layer : "matrix"));
     }
   }
 
@@ -288,21 +285,27 @@ export function Corrector({
                     ))}
                   </div>
                 </div>
-                <div className="tool-group">
-                  <span className="toolbar-label">Кисть</span>
-                  <label className="ctl">размер
-                    <input className="slider" type="range" min={2} max={60} value={state.brush}
-                      onChange={(e) => setState({ ...state, brush: +e.target.value })} />
-                    <span className="slider-val">{state.brush}px</span>
-                  </label>
-                  {state.tool === "threshold" && (
-                    <label className="ctl">порог
-                      <input className="slider" type="range" min={5} max={200} value={thr}
-                        onChange={(e) => setThr(+e.target.value)} />
-                      <span className="slider-val">{thr}</span>
+                {(state.tool === "brush" || state.tool === "eraser") && (
+                  <div className="tool-group">
+                    <span className="toolbar-label">Кисть</span>
+                    <label className="ctl">размер
+                      <input className="slider" type="range" min={2} max={60} value={state.brush}
+                        onChange={(e) => setState({ ...state, brush: +e.target.value })} />
+                      <span className="slider-val">{state.brush}px</span>
                     </label>
-                  )}
-                </div>
+                  </div>
+                )}
+                {state.tool === "superpixel" && (
+                  <div className="tool-group">
+                    <span className="toolbar-label">Клик по суперпикселю</span>
+                    <div className="seg" role="group" aria-label="Клик по суперпикселю">
+                      {(["Ставить", "Убирать"] as const).map((a) => (
+                        <button key={a} type="button" className={spAction === a ? "active" : ""} aria-pressed={spAction === a}
+                          onClick={() => setSpAction(a)}>{a}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="tool-group">
                   <span className="toolbar-label">Слои</span>
                   <div className="layers">
