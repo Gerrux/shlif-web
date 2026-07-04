@@ -35,13 +35,17 @@ def _perturb(rgb: np.ndarray, gamma: float, gain: float) -> np.ndarray:
     return (x * 255.0).astype(np.uint8)
 
 
-def ensemble_phase_labels(rgb: np.ndarray, cfg, perturbations=_PERTURBATIONS) -> np.ndarray:
+def ensemble_phase_labels(rgb: np.ndarray, cfg, perturbations=_PERTURBATIONS, on_step=None) -> np.ndarray:
     """Stack of phase-label maps (K, H, W) — one classical segmentation per
-    photometric perturbation."""
+    photometric perturbation. `on_step(i, total)`, if given, is called after each
+    perturbation completes (1-indexed) — for progress reporting."""
     maps = []
-    for gamma, gain in perturbations:
+    total = len(perturbations)
+    for i, (gamma, gain) in enumerate(perturbations, 1):
         pre = preprocess(_perturb(rgb, gamma, gain), cfg.preprocess)
         maps.append(segment_phases(pre, cfg.segment).labels.astype(np.uint8))
+        if on_step:
+            on_step(i, total)
     return np.stack(maps)
 
 
@@ -63,15 +67,16 @@ def entropy_map(label_stack: np.ndarray, n_phases: int = _N_PHASES) -> np.ndarra
     return (ent / np.log(n_phases)).astype(np.float32)
 
 
-def ensemble_uncertainty(rgb: np.ndarray, cfg, conf_thr: float = 0.7) -> dict:
+def ensemble_uncertainty(rgb: np.ndarray, cfg, conf_thr: float = 0.7, on_step=None) -> dict:
     """Run the perturbation ensemble and summarise its disagreement.
 
     Returns ``confidence`` (HxW float 0..1), ``entropy`` (HxW float 0..1),
     ``low_conf`` (HxW bool — pixels whose modal phase held in fewer than
     ``conf_thr`` of the runs), ``undetermined_fraction`` (scalar) and the
-    ensemble ``labels`` stack.
+    ensemble ``labels`` stack. ``on_step``, if given, is forwarded to
+    ``ensemble_phase_labels`` for progress reporting.
     """
-    stack = ensemble_phase_labels(rgb, cfg)
+    stack = ensemble_phase_labels(rgb, cfg, on_step=on_step)
     conf = confidence_map(stack)
     low_conf = conf < float(conf_thr)
     return {
