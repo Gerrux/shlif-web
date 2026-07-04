@@ -1,9 +1,6 @@
-export const metadata = { title: "Шлиф · классификация руд", description: "Обработка и доработка шлифов" };
-
+import "./globals.css";
+import Providers from "./providers";
+export const metadata = { title: "Шлиф · классификация руд" };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="ru">
-      <body>{children}</body>
-    </html>
-  );
+  return (<html lang="ru"><body><Providers>{children}</Providers></body></html>);
 }
