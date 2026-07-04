@@ -1,11 +1,10 @@
-import type { Job, Mode, Verdict } from "./types";
+import type { Job, Verdict } from "./types";
 
 const base = "";
 
-export async function analyze(file: File, mode: Mode): Promise<{ job_id: string }> {
+export async function analyze(file: File): Promise<{ job_id: string }> {
   const fd = new FormData();
   fd.append("image", file);
-  fd.append("mode", mode);
   const r = await fetch(`${base}/api/analyze`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(`analyze failed: ${r.status}`);
   return r.json();
