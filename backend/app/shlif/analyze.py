@@ -38,6 +38,42 @@ def _intergrowth_split(sulfide: np.ndarray, magnetite: np.ndarray, dist_px: int)
     return normal, fine
 
 
+def verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px: int = 12) -> dict:
+    """Phase-composition verdict from (already-decided) phase masks + talc overlay.
+    Returns {ore_class, text, metrics}. Shared by analyze_image and the web recompute."""
+    talc_frac = talc_fraction(talc)
+    normal, fine = _intergrowth_split(sulfide, magnetite, dist_px)
+    sulf_area = float(sulfide.sum())
+    fine_share = float(fine.sum()) / sulf_area if sulf_area > 0 else 0.0
+    normal_share = 1.0 - fine_share
+
+    rule = cfg.rule
+    talc_thr = float(rule.talc_threshold)
+    dom_thr = float(rule.dominance_threshold)
+    if talc_frac > talc_thr:
+        ore = phases.ORE_TALCOSE
+        confidence = min(1.0, (talc_frac - talc_thr) / max(talc_thr, 1e-6) + 0.5)
+    else:
+        margin = abs(fine_share - dom_thr) / max(dom_thr, 1e-6)
+        confidence = min(1.0, 0.5 + margin)
+        ore = phases.ORE_HARD if fine_share > dom_thr else phases.ORE_ORDINARY
+        if confidence < float(rule.fine_min_confidence):
+            ore = phases.ORE_REVIEW
+
+    total = matrix.size
+    metrics = {
+        "sulfide_frac": float(sulfide.sum()) / total,
+        "magnetite_frac": float(magnetite.sum()) / total,
+        "matrix_frac": float(matrix.sum()) / total,
+        "talc_frac": talc_frac,
+        "normal_share": normal_share,
+        "fine_share": fine_share,
+        "confidence": confidence,
+    }
+    return {"ore_class": ore, "text": _verdict_text(ore, metrics),
+            "metrics": metrics, "normal": normal, "fine": fine}
+
+
 def analyze_image(rgb: np.ndarray, cfg, dist_px: int = 12, detect_talc_flag: bool = False,
                   ore_mask: np.ndarray | None = None,
                   talc_mask: np.ndarray | None = None) -> Analysis:
@@ -87,41 +123,8 @@ def analyze_image(rgb: np.ndarray, cfg, dist_px: int = 12, detect_talc_flag: boo
         talc = detect_talc(pre, matrix, cfg.talc)
     else:
         talc = np.zeros(rgb.shape[:2], dtype=bool)
-    talc_frac = talc_fraction(talc)
-
-    normal, fine = _intergrowth_split(sulfide, magnetite, dist_px)
-    sulf_area = float(sulfide.sum())
-    fine_share = float(fine.sum()) / sulf_area if sulf_area > 0 else 0.0
-    normal_share = 1.0 - fine_share
-
-    rule = cfg.rule
-    talc_thr = float(rule.talc_threshold)
-    dom_thr = float(rule.dominance_threshold)
-
-    if talc_frac > talc_thr:
-        ore = phases.ORE_TALCOSE
-        confidence = min(1.0, (talc_frac - talc_thr) / max(talc_thr, 1e-6) + 0.5)
-    else:
-        margin = abs(fine_share - dom_thr) / max(dom_thr, 1e-6)
-        confidence = min(1.0, 0.5 + margin)
-        if fine_share > dom_thr:
-            ore = phases.ORE_HARD
-        else:
-            ore = phases.ORE_ORDINARY
-        if confidence < float(rule.fine_min_confidence):
-            ore = phases.ORE_REVIEW
-
-    total = matrix.size
-    metrics = {
-        "sulfide_frac": float(sulfide.sum()) / total,
-        "magnetite_frac": float(magnetite.sum()) / total,
-        "matrix_frac": float(matrix.sum()) / total,
-        "talc_frac": talc_frac,
-        "normal_share": normal_share,
-        "fine_share": fine_share,
-        "confidence": confidence,
-    }
-    text = _verdict_text(ore, metrics)
+    v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px)
+    ore, text, metrics, normal, fine = v["ore_class"], v["text"], v["metrics"], v["normal"], v["fine"]
     masks = {
         "sulfide": sulfide,
         "magnetite": magnetite,
