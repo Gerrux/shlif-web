@@ -16,14 +16,15 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from app.shlif import load_config  # noqa: F401 (kept for parity)
+from app.shlif import load_config, phases  # noqa: F401 (load_config kept for parity)
 from app.shlif.features import extract_features
-from app.shlif.imageio import load_rgb
+from app.shlif.imageio import load_rgb  # still used by _run_panorama's display load;
+# Task 6 replaces that call site with the shared working array and drops this import.
 from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
-from app.shlif.talc import detect_talc
-from app.shlif.tiling import iter_tiles, tile_blend_weight, tile_grid
-from app.pipeline import loader
+from app.shlif.talc import dark_gray_phase, detect_talc
+from app.shlif.tiling import axis_core_bounds, iter_tiles, load_working_array, tile_blend_weight, tile_grid
+from app.pipeline import loader, masks
 from app.core import paths
 
 SORT_RGB = {"ordinary": (80, 190, 120), "hard": (225, 85, 80), "talcose": (95, 140, 235)}
@@ -51,6 +52,47 @@ def aggregate_section(records, classes) -> np.ndarray:
         W = np.ones(len(records), np.float32)
     P = np.array([[float(pd[c]) for c in classes] for pd, _ in records], np.float32)
     return (P * W[:, None]).sum(0) / W.sum()
+
+
+def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
+    """Tile the section, segment + talc-detect each tile, and reassemble one
+    continuous mask set for the whole working canvas — core-crop (no overlap
+    double count, see `axis_core_bounds`) — so `verdict_from_masks` sees the
+    same kind of input it gets from a single close-up pass."""
+    H, W = arr.shape[:2]
+    sulfide = np.zeros((H, W), bool)
+    magnetite = np.zeros((H, W), bool)
+    matrix = np.zeros((H, W), bool)
+    talc = np.zeros((H, W), bool)
+    dg = np.zeros((H, W), bool)
+    tile_px = int(cfg.tiling.tile)
+    step = max(1, tile_px - int(cfg.tiling.overlap))
+    x_core_end = axis_core_bounds(W, tile_px, step)
+    y_core_end = axis_core_bounds(H, tile_px, step)
+
+    for tile in iter_tiles(path, cfg.tiling, arr=arr):
+        # a tile's core always starts at its own (x, y) — only the end can be
+        # pulled in earlier than the tile's full extent, per axis_core_bounds
+        cx0, cy0 = tile.x, tile.y
+        cx1, cy1 = x_core_end[tile.x], y_core_end[tile.y]
+        lx1, ly1 = cx1 - tile.x, cy1 - tile.y
+
+        if tile.empty:
+            matrix[cy0:cy1, cx0:cx1] = True
+            continue
+
+        pre = preprocess(tile.rgb, cfg.preprocess)
+        seg = segment_phases(pre, cfg.segment)
+        tk = detect_talc(pre, seg.labels == phases.MATRIX, cfg.talc)
+        dgm, _ = dark_gray_phase(tile.rgb, cfg.talc)
+
+        sulfide[cy0:cy1, cx0:cx1] = seg.sulfide[:ly1, :lx1]
+        magnetite[cy0:cy1, cx0:cx1] = seg.magnetite[:ly1, :lx1]
+        matrix[cy0:cy1, cx0:cx1] = seg.labels[:ly1, :lx1] == phases.MATRIX
+        talc[cy0:cy1, cx0:cx1] = tk[:ly1, :lx1]
+        dg[cy0:cy1, cx0:cx1] = dgm[:ly1, :lx1] & (seg.labels[:ly1, :lx1] == phases.MATRIX)
+
+    return {"sulfide": sulfide, "magnetite": magnetite, "matrix": matrix, "talc": talc, "dg": dg}
 
 
 def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
