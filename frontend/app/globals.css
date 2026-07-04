@@ -97,6 +97,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   background: linear-gradient(155deg, oklch(72% 0.13 72), oklch(50% 0.12 55));
   display: grid; place-items: center; color: oklch(24% 0.05 55);
   box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.32), 0 4px 12px oklch(50% 0.12 55 / 0.28);
+  font-size: 19px; line-height: 1;
 }
 
 /* ---- Переключатель темы ---- */
