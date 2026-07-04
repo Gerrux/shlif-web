@@ -29,6 +29,28 @@ from app.core import paths
 SORT_RGB = {"ordinary": (80, 190, 120), "hard": (225, 85, 80), "talcose": (95, 140, 235)}
 TALC_RGB = (60, 120, 255)
 DISPLAY_MP = 4_000_000
+ORE_DENSITY_PCT = 92.0  # global brightness percentile that separates ore flecks from silicate
+
+
+def ore_density(gray: np.ndarray, bright_thr: float) -> float:
+    """Fraction of a tile brighter than the panorama's global bright threshold — an
+    ore-density prior (bright sulfide flecks vs faint silicate field)."""
+    return float((np.asarray(gray, np.float32) > float(bright_thr)).mean())
+
+
+def aggregate_section(records, classes) -> np.ndarray:
+    """Ore-density-weighted mean of the per-tile class probabilities.
+
+    ``records`` is a list of ``(proba_dict, weight)``. Faint silicate tiles carry a
+    near-zero weight so they cannot dilute the verdict; if every weight is zero the
+    average falls back to unweighted (never divide-by-zero); empty → zero vector."""
+    if not records:
+        return np.zeros(len(classes), np.float32)
+    W = np.array([max(float(w), 0.0) for _, w in records], np.float32)
+    if W.sum() <= 0:
+        W = np.ones(len(records), np.float32)
+    P = np.array([[float(pd[c]) for c in classes] for pd, _ in records], np.float32)
+    return (P * W[:, None]).sum(0) / W.sum()
 
 
 def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
@@ -42,6 +64,10 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     disp = load_rgb(path, max_pixels=display_mp)
     dh, dw = disp.shape[:2]
     rx, ry = dw / Wt, dh / Ht
+    # global brightness threshold → per-tile ore-density weight (item: disseminated
+    # panoramas where segmentation reads every tile as ore-bearing)
+    ore_pct = float(getattr(cfg.tiling, "ore_density_pct", ORE_DENSITY_PCT))
+    bright_thr = float(np.percentile(cv2.cvtColor(disp, cv2.COLOR_RGB2GRAY), ore_pct))
 
     base = disp.astype(np.float32)
     # Feathered stitch: accumulate weight*colour per tile and normalise, so
@@ -78,7 +104,8 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
             feats = extract_features(rgb, cfg)
             proba = clf.predict_proba(np.array([[feats[k] for k in feat_names]], float))[0]
             pd = {classes[i]: float(proba[i]) for i in range(len(classes))}
-            records.append((pd, ore_px))
+            dens = ore_density(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), bright_thr)
+            records.append((pd, dens))
             col = np.array(SORT_RGB[max(pd, key=lambda k: pd[k])], np.float32)
             wgt = tile_blend_weight(dy1 - dy0, dx1 - dx0)
             color_num[dy0:dy1, dx0:dx1] += wgt[..., None] * col
@@ -90,11 +117,9 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
                             interpolation=cv2.INTER_NEAREST).astype(bool)
             talc_disp[dy0:dy1, dx0:dx1] |= td
 
-    W = np.array([max(r[1], 1) for r in records], float)
-    P = np.array([[r[0][c] for c in classes] for r in records])
-    sec = (P * W[:, None]).sum(0) / W.sum() if len(P) else np.zeros(len(classes))
-    verdict = classes[int(sec.argmax())] if len(P) else "review"
-    conf = float(sec.max()) if len(P) else 0.0
+    sec = aggregate_section(records, classes)
+    verdict = classes[int(sec.argmax())] if records else "review"
+    conf = float(sec.max()) if records else 0.0
 
     overlay = base.copy()
     cov = weight_den > 0
