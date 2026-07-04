@@ -3,7 +3,12 @@
 // имя команды текстом + эмодзи-ракета, дроп-зона загрузки (drag&drop или клик). Режим
 // (крупный план / панорама) здесь не выбирается — переключается уже в рабочей зоне.
 import { useState } from "react";
-import { IconUpload } from "@/components/icons";
+import { IconUpload, IconTelegram } from "@/components/icons";
+
+const TEAM = [
+  { name: "Илья", url: "https://t.me/gerrux" },
+  { name: "Никита", url: "https://t.me/sngflu" },
+];
 
 export function Welcome({ onFile }: { onFile: (f: File) => void }) {
   const [drag, setDrag] = useState(false);
@@ -45,6 +50,14 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
           <span className="dz-sub">или нажмите, чтобы выбрать · JPG / PNG · OM, отражённый свет</span>
           <input type="file" accept="image/*" onChange={pickFromInput} style={{ display: "none" }} />
         </label>
+      </div>
+      <div className="welcome-credits">
+        <span className="wc-label">Команда</span>
+        {TEAM.map((m) => (
+          <a key={m.url} className="wc-link" href={m.url} target="_blank" rel="noopener noreferrer">
+            <IconTelegram className="ico-sm" />{m.name}
+          </a>
+        ))}
       </div>
     </section>
   );
