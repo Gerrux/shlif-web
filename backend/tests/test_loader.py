@@ -13,6 +13,12 @@ def test_classifier_absent_returns_none(monkeypatch, tmp_path):
     # monkeypatch reverts settings.models_dir at teardown.
     loader.load_classifier.cache_clear()
 
+def test_load_ore_unet_absent_returns_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(loader.settings, "models_dir", tmp_path)
+    loader.load_ore_unet.cache_clear()
+    assert loader.load_ore_unet() is None
+    loader.load_ore_unet.cache_clear()
+
 def test_gpu_false_without_torch():
     assert loader.gpu_available() is False
 
