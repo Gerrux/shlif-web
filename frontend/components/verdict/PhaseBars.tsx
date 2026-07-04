@@ -16,7 +16,7 @@ export function PhaseBars({ verdict }: { verdict: Verdict }) {
   return (
     <div className="verdict">
       <div className="vh">
-        <div className="eye">Фазовый состав · правило</div>
+        <div className="eye">Фазовый состав</div>
         <div className="cls"><span className={`oreclass ${verdict.ore_class}`}>{oreRu(verdict.ore_class)}</span></div>
       </div>
       <div className="vb">
