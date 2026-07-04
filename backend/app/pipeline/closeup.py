@@ -27,7 +27,7 @@ def analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict:
     report(0.15, "сегментация фаз")
     if unet is not None:
         model, device = unet
-        talc_mask = talc_unet_mask(rgb, model, device, thr=None)
+        talc_mask = talc_unet_mask(rgb, model, device, thr=0.5)
         res = analyze_image(rgb, cfg, talc_mask=talc_mask)
     else:
         res = analyze_image(rgb, cfg, detect_talc_flag=True)  # classical talc seed
