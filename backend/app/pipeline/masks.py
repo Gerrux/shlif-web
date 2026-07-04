@@ -5,6 +5,7 @@ from skimage.segmentation import slic
 from app.core import paths
 from app.shlif import phases
 from app.shlif.analyze import verdict_from_masks
+from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 
 def phase_label_map(sulfide: np.ndarray, magnetite: np.ndarray) -> np.ndarray:
     pm = np.zeros(sulfide.shape, np.uint8)          # 0 = matrix
@@ -75,3 +76,19 @@ def persist_editor_artifacts(jid: str, r: dict) -> None:
     (mp / "darkness.png").write_bytes(encode_png_gray(r["darkness"]))
     (mp / "confidence.png").write_bytes(
         encode_png_gray(np.clip(r["confidence"] * 255.0, 0, 255).astype(np.uint8)))
+
+
+_UNC_MAX_SIDE = 1024  # cap the ensemble-segmentation resolution — the fraction is scale-robust
+
+
+def uncertainty_for_editor(rgb: np.ndarray, cfg) -> dict:
+    """Ensemble-perturbation uncertainty, computed on a downscaled copy for
+    speed and the confidence map resized back to `rgb`'s own frame. Shared by
+    closeup and panorama so both report confidence/low_conf_zones the same way."""
+    h, w = rgb.shape[:2]
+    s = min(1.0, _UNC_MAX_SIDE / max(h, w))
+    small = cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA) if s < 1 else rgb
+    u = ensemble_uncertainty(small, cfg)
+    conf = cv2.resize(u["confidence"], (w, h), interpolation=cv2.INTER_LINEAR)
+    return {"confidence": conf, "undetermined_fraction": u["undetermined_fraction"],
+            "low_conf_zones": find_low_conf_zones(u)}

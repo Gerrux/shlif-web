@@ -74,3 +74,10 @@ def test_persist_editor_artifacts_writes_all_files(tmp_path, monkeypatch):
     assert (tmp_path / "maps" / "jobx" / "superpixels.png").exists()
     assert (tmp_path / "maps" / "jobx" / "darkness.png").exists()
     assert (tmp_path / "maps" / "jobx" / "confidence.png").exists()
+
+def test_uncertainty_for_editor_returns_full_res_confidence(tiny_rgb):
+    cfg = loader.get_config()
+    u = masks.uncertainty_for_editor(tiny_rgb, cfg)
+    assert u["confidence"].shape == tiny_rgb.shape[:2]
+    assert 0.0 <= u["undetermined_fraction"] <= 1.0
+    assert isinstance(u["low_conf_zones"], list)
