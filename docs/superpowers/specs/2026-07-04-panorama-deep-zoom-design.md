@@ -106,8 +106,8 @@ redesign.
 analyze_panorama()
   → arr = load_working_array(path, cfg.tiling)        (unchanged, up to cfg.tiling.max_pixels)
   → _assemble_masks(...), _run_panorama(...)            (unchanged)
-  → try: tiles.build_pyramid(arr, jid)                  (new — writes data/tiles/{jid}/**)
   → save data/images/{jid}.jpg from run["overlay"]      (unchanged path/size)
+  → try: tiles.build_pyramid(arr, jid)                  (new — writes data/tiles/{jid}/**)
   → JobStore.set_status(jid, "done", ...)
 
 GET /api/tiles/{jid}/manifest.json      → 200 + JSON, or 404 (no pyramid: closeup / pre-feature / failed build)
