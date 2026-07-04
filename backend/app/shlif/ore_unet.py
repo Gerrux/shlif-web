@@ -44,12 +44,18 @@ def build_ore_unet(ckpt: str = ORE_CKPT, device: str | None = None):
         return None
 
 
-def ore_unet_mask(rgb: np.ndarray, model, device: str, tile: int = 512) -> np.ndarray:
+def ore_unet_mask(rgb: np.ndarray, model, device: str, tile: int = 512,
+                   batch_size: int = 32) -> np.ndarray:
     """Bool (H, W): True = ore (sulfide+magnetite), tiled U-Net inference.
 
     Applies gray-world WB + CLAHE per sub-tile before the ImageNet
     normalisation -- IDENTICAL to training (``wb_clahe``). This MUST stay on
     for this checkpoint (unlike the talc U-Net, which trained on raw RGB).
+
+    All under-tile crops are stacked into as few forward passes as
+    ``batch_size`` allows (default 32 -- a typical 2048px panorama tile at
+    tile=512 is 16 crops, comfortably one batch), instead of one model call
+    per crop.
     """
     import torch
 
@@ -57,15 +63,28 @@ def ore_unet_mask(rgb: np.ndarray, model, device: str, tile: int = 512) -> np.nd
 
     H, W = rgb.shape[:2]
     ore = np.zeros((H, W), bool)
+
+    coords, dims, crops = [], [], []
+    for y in range(0, H, tile):
+        for x in range(0, W, tile):
+            crop = rgb[y:y + tile, x:x + tile]
+            ch, cw = crop.shape[:2]
+            cp = cv2.copyMakeBorder(crop, 0, tile - ch, 0, tile - cw, cv2.BORDER_REFLECT)
+            cp = wb_clahe(cp)
+            t = ((cp.astype(np.float32) / 255.0 - _MEAN) / _STD).transpose(2, 0, 1)
+            coords.append((y, x))
+            dims.append((ch, cw))
+            crops.append(t)
+
+    if not crops:
+        return ore
+
+    batch = torch.from_numpy(np.stack(crops)).to(device)
     with torch.inference_mode():
-        for y in range(0, H, tile):
-            for x in range(0, W, tile):
-                crop = rgb[y:y + tile, x:x + tile]
-                ch, cw = crop.shape[:2]
-                cp = cv2.copyMakeBorder(crop, 0, tile - ch, 0, tile - cw, cv2.BORDER_REFLECT)
-                cp = wb_clahe(cp)
-                t = ((cp.astype(np.float32) / 255.0 - _MEAN) / _STD).transpose(2, 0, 1)
-                t = torch.from_numpy(t).unsqueeze(0).to(device)
-                p = model(t).argmax(1)[0].cpu().numpy()
+        for start in range(0, len(crops), batch_size):
+            chunk = batch[start:start + batch_size]
+            preds = model(chunk).argmax(1).cpu().numpy()
+            for i, p in enumerate(preds):
+                (y, x), (ch, cw) = coords[start + i], dims[start + i]
                 ore[y:y + ch, x:x + cw] = (p[:ch, :cw] != 0)
     return ore
