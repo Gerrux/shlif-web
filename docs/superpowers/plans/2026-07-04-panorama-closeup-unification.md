@@ -306,6 +306,34 @@ def test_axis_tile_starts_matches_naive_loop_with_tail_filter():
     assert axis_tile_starts(size, tile, step) == expected
 
 
+def test_axis_tile_starts_matches_iter_tiles_actual_yielded_positions(tmp_path):
+    """Cross-check against iter_tiles' real behavior (not just a second copy
+    of the same loop/filter logic as the test above) -- guards against the
+    two implementations silently drifting apart if either one's loop bound
+    or tail-filter threshold ever changes without the other."""
+    import copy
+
+    from PIL import Image
+
+    from app.pipeline import loader
+    from app.shlif.tiling import iter_tiles
+
+    W, H, tile, overlap = 2000, 1500, 320, 64
+    step = tile - overlap
+    img = np.random.default_rng(0).integers(0, 255, (H, W, 3), dtype=np.uint8)
+    p = tmp_path / "grid.jpg"
+    Image.fromarray(img).save(p, "JPEG", quality=95)
+
+    cfg = copy.deepcopy(loader.get_config())
+    cfg.tiling.tile = tile
+    cfg.tiling.overlap = overlap
+
+    xs = sorted({t.x for t in iter_tiles(str(p), cfg.tiling)})
+    ys = sorted({t.y for t in iter_tiles(str(p), cfg.tiling)})
+    assert xs == axis_tile_starts(W, tile, step)
+    assert ys == axis_tile_starts(H, tile, step)
+
+
 def test_axis_core_bounds_last_tile_extends_to_true_edge():
     bounds = axis_core_bounds(2000, 320, 256)
     last_start = max(bounds)
