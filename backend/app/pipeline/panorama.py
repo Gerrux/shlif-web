@@ -1,4 +1,122 @@
+"""Panorama product flow — tile a whole-section scan, classify ore-rich tiles,
+aggregate an ore-area-weighted section verdict, and stitch a display overlay.
+
+Ported from ``hakaton_nornikel/scripts/analyze_panorama.py::run_panorama``
+(classical path only — no U-Net). Torch is never imported here, at module top
+level or otherwise, so `import app.pipeline.panorama` works without torch
+installed.
+"""
+
 from __future__ import annotations
 
+import time
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from app.shlif import load_config  # noqa: F401 (kept for parity)
+from app.shlif.features import extract_features
+from app.shlif.imageio import load_rgb
+from app.shlif.preprocess import preprocess
+from app.shlif.segment import segment_phases
+from app.shlif.talc import detect_talc
+from app.shlif.tiling import iter_tiles, tile_grid
+from app.pipeline import loader
+from app.core import paths
+
+SORT_RGB = {"ordinary": (80, 190, 120), "hard": (225, 85, 80), "talcose": (95, 140, 235)}
+TALC_RGB = (60, 120, 255)
+DISPLAY_MP = 4_000_000
+
+
+def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
+                  display_mp: int = DISPLAY_MP) -> dict:
+    """Tile a panorama, classify ore-rich tiles, aggregate a section verdict, and
+    stitch a display overlay. Returns a dict with `overlay` (RGB uint8, no banner)
+    plus verdict fields. `cfg.tiling.tile` and `cfg.talc.detect_dark_frac` should
+    already be set by the caller. Classical matrix segmentation + classical talc
+    detection only (no GPU U-Net branch)."""
+    Wt, Ht, factor = tile_grid(path, cfg.tiling)
+    disp = load_rgb(path, max_pixels=display_mp)
+    dh, dw = disp.shape[:2]
+    rx, ry = dw / Wt, dh / Ht
+
+    overlay = disp.astype(np.float32).copy()
+    talc_disp = np.zeros((dh, dw), bool)
+    records = []
+    talc_px = matrix_px = 0
+    n_tiles = n_ore = n_matrix = 0
+    t0 = time.time()
+
+    for tile in iter_tiles(path, cfg.tiling):
+        n_tiles += 1
+        if tile.empty:
+            continue
+        rgb = tile.rgb
+        pre = preprocess(rgb, cfg.preprocess)
+        matrix = segment_phases(pre, cfg.segment).labels == 0
+        talc = detect_talc(pre, matrix, cfg.talc)
+        ore_px = int((~matrix).sum())
+        ore_frac = ore_px / max(matrix.size, 1)
+        talc_px += int(talc.sum()); matrix_px += int(matrix.sum())
+
+        dx0, dy0 = int(tile.x * rx), int(tile.y * ry)
+        dx1, dy1 = min(int((tile.x + rgb.shape[1]) * rx), dw), min(int((tile.y + rgb.shape[0]) * ry), dh)
+        if dx1 <= dx0 or dy1 <= dy0:
+            continue
+
+        if ore_frac >= min_ore:
+            n_ore += 1
+            feats = extract_features(rgb, cfg)
+            proba = clf.predict_proba(np.array([[feats[k] for k in feat_names]], float))[0]
+            pd = {classes[i]: float(proba[i]) for i in range(len(classes))}
+            records.append((pd, ore_px))
+            col = np.array(SORT_RGB[max(pd, key=lambda k: pd[k])], np.float32)
+            reg = overlay[dy0:dy1, dx0:dx1]
+            overlay[dy0:dy1, dx0:dx1] = 0.68 * reg + 0.32 * col
+        else:
+            n_matrix += 1
+        if talc.any():
+            td = cv2.resize(talc.astype(np.uint8), (dx1 - dx0, dy1 - dy0),
+                            interpolation=cv2.INTER_NEAREST).astype(bool)
+            talc_disp[dy0:dy1, dx0:dx1] |= td
+
+    W = np.array([max(r[1], 1) for r in records], float)
+    P = np.array([[r[0][c] for c in classes] for r in records])
+    sec = (P * W[:, None]).sum(0) / W.sum() if len(P) else np.zeros(len(classes))
+    verdict = classes[int(sec.argmax())] if len(P) else "review"
+    conf = float(sec.max()) if len(P) else 0.0
+
+    out = overlay.copy()
+    out[talc_disp] = 0.68 * out[talc_disp] + 0.32 * np.array(TALC_RGB, np.float32)
+    out = np.clip(out, 0, 255).astype(np.uint8)
+
+    return {
+        "overlay": out, "verdict": verdict, "conf": conf,
+        "proba": {classes[i]: float(sec[i]) for i in range(len(classes))},
+        "talc_frac": talc_px / max(talc_px + matrix_px, 1),
+        "n_ore": n_ore, "n_matrix": n_matrix, "n_tiles": n_tiles,
+        "seconds": time.time() - t0, "factor": factor,
+    }
+
+
 def analyze_panorama(path: str, cfg, jid: str) -> dict:
-    raise NotImplementedError("panorama wired in Task 8")
+    """Public wrapper called by the API for `mode=="panorama"`."""
+    cfg.tiling.tile = 2048
+    cfg.talc.detect_dark_frac = 0.15
+    bundle = loader.load_classifier()
+    if bundle is None:
+        raise RuntimeError("classifier.pkl required for panorama sort")
+    clf, feat, classes = bundle
+    r = _run_panorama(path, clf, feat, classes, cfg)
+    out = paths.images_dir() / f"{jid}.jpg"
+    Image.fromarray(r["overlay"]).save(out, "JPEG", quality=88)
+    return {
+        "mode": "panorama",
+        "verdict": {"ore_class": r["verdict"], "text": "",
+                    "metrics": {"talc_frac": r["talc_frac"], "confidence": r["conf"],
+                                "sort_proba": r["proba"]}},
+        "overlay_url": f"/api/images/{jid}.jpg",
+        "n_ore": r["n_ore"], "n_tiles": r["n_tiles"], "talc_frac": r["talc_frac"],
+    }
