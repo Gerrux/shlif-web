@@ -23,6 +23,27 @@ def test_verdict_from_masks_reacts_to_talc():
     talcy = masks.verdict_from_masks_dict(s, m, mx & lots | mx, lots & mx, cfg)
     assert talcy["metrics"]["talc_frac"] > no_talc["metrics"]["talc_frac"]
 
+def test_intergrowth_label_map_values():
+    normal = np.zeros((10, 10), bool); normal[0:3, 0:3] = True
+    fine = np.zeros((10, 10), bool); fine[5:8, 5:8] = True
+    im = masks.intergrowth_label_map(normal, fine)
+    assert im.dtype == np.uint8
+    assert set(np.unique(im)) <= {0, 1, 2}
+    assert (im[0:3, 0:3] == 1).all()
+    assert (im[5:8, 5:8] == 2).all()
+    assert (im[8:, 8:] == 0).all()
+
+def test_verdict_from_masks_dict_includes_intergrowth():
+    cfg = loader.get_config()
+    s = np.zeros((100, 100), bool); s[:10] = True
+    m = np.zeros((100, 100), bool)
+    mx = ~(s | m)
+    v = masks.verdict_from_masks_dict(s, m, mx, np.zeros((100, 100), bool), cfg)
+    assert "intergrowth" in v
+    assert v["intergrowth"].shape == s.shape
+    assert v["intergrowth"].dtype == np.uint8
+    assert set(np.unique(v["intergrowth"])) <= {0, 1, 2}
+
 def test_superpixel_and_darkness_maps(tiny_rgb):
     sp = masks.build_superpixel_map(tiny_rgb, n_segments=120)
     assert sp.dtype == np.uint16 and sp.shape == tiny_rgb.shape[:2] and sp.max() >= 50

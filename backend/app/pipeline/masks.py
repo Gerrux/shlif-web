@@ -16,9 +16,17 @@ def phase_label_map(sulfide: np.ndarray, magnetite: np.ndarray) -> np.ndarray:
 def split_phase_map(pm: np.ndarray):
     return pm == phases.SULFIDE, pm == phases.MAGNETITE, pm == phases.MATRIX
 
+def intergrowth_label_map(normal: np.ndarray, fine: np.ndarray) -> np.ndarray:
+    """0 = not sulfide (magnetite/matrix/talc), 1 = normal (обычные), 2 = fine (тонкие)."""
+    im = np.zeros(normal.shape, np.uint8)
+    im[np.asarray(fine, dtype=bool)] = 2
+    im[np.asarray(normal, dtype=bool)] = 1
+    return im
+
 def verdict_from_masks_dict(sulfide, magnetite, matrix, talc, cfg) -> dict:
     v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg)
-    return {"ore_class": v["ore_class"], "text": v["text"], "metrics": v["metrics"]}
+    return {"ore_class": v["ore_class"], "text": v["text"], "metrics": v["metrics"],
+            "intergrowth": intergrowth_label_map(v["normal"], v["fine"])}
 
 def build_superpixel_map(rgb: np.ndarray, n_segments: int = 600) -> np.ndarray:
     seg = slic(rgb, n_segments=n_segments, compactness=12, start_label=0)
