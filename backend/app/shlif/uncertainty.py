@@ -12,6 +12,10 @@ verdict should be double-checked. (Borrowed idea; adapted to the classical path.
 
 from __future__ import annotations
 
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 from . import phases
@@ -29,6 +33,25 @@ _PERTURBATIONS = (
 _N_PHASES = 3  # matrix / magnetite / sulfide
 _PHASE_RU = {phases.MATRIX: "матрица", phases.MAGNETITE: "магнетит", phases.SULFIDE: "сульфид"}
 
+_POOL: ThreadPoolExecutor | None = None
+_POOL_LOCK = threading.Lock()
+
+
+def _pool() -> ThreadPoolExecutor:
+    """Lazily-created, process-wide thread pool for the perturbation ensemble.
+    Persistent (not re-created per call) — this runs on every non-empty tile,
+    potentially thousands of times per gigapixel panorama. segment_phases and
+    its preprocessing are cv2/numpy/skimage calls on large arrays, which
+    release the GIL, so threads (not processes) give real parallelism here
+    without pickling/IPC overhead per tile. Uses double-checked locking to
+    ensure thread-safe initialization."""
+    global _POOL
+    if _POOL is None:
+        with _POOL_LOCK:
+            if _POOL is None:
+                _POOL = ThreadPoolExecutor(max_workers=min(len(_PERTURBATIONS), os.cpu_count() or 1))
+    return _POOL
+
 
 def _perturb(rgb: np.ndarray, gamma: float, gain: float) -> np.ndarray:
     x = np.clip((rgb.astype(np.float32) / 255.0) ** gamma * gain, 0.0, 1.0)
@@ -37,13 +60,21 @@ def _perturb(rgb: np.ndarray, gamma: float, gain: float) -> np.ndarray:
 
 def ensemble_phase_labels(rgb: np.ndarray, cfg, perturbations=_PERTURBATIONS, on_step=None) -> np.ndarray:
     """Stack of phase-label maps (K, H, W) — one classical segmentation per
-    photometric perturbation. `on_step(i, total)`, if given, is called after each
-    perturbation completes (1-indexed) — for progress reporting."""
-    maps = []
-    total = len(perturbations)
-    for i, (gamma, gain) in enumerate(perturbations, 1):
+    photometric perturbation, run concurrently across a thread pool (they are
+    independent of each other). `on_step(i, total)`, if given, is called once
+    per perturbation in the same fixed 1..total order as before — every
+    perturbation is submitted to the pool up front (so they run in parallel),
+    but progress is still reported in original order, not completion order."""
+    def _one(pert):
+        gamma, gain = pert
         pre = preprocess(_perturb(rgb, gamma, gain), cfg.preprocess)
-        maps.append(segment_phases(pre, cfg.segment).labels.astype(np.uint8))
+        return segment_phases(pre, cfg.segment).labels.astype(np.uint8)
+
+    total = len(perturbations)
+    futures = [_pool().submit(_one, pert) for pert in perturbations]
+    maps = []
+    for i, f in enumerate(futures, 1):
+        maps.append(f.result())
         if on_step:
             on_step(i, total)
     return np.stack(maps)

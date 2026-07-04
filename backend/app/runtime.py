@@ -7,7 +7,7 @@ class Runtime:
         from app.jobs.store import JobStore
         from app.jobs.runner import JobRunner
         self.store = JobStore(paths.db_path())
-        self.runner = JobRunner(self.store)
+        self.runner = JobRunner(self.store, max_workers=2)
 
 _runtime: Runtime | None = None
 

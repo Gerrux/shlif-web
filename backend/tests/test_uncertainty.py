@@ -4,7 +4,12 @@ Segment the image under a few soft photometric perturbations; where the phase
 label is stable across the ensemble the pixel is confident, where it flips the
 pixel is disputed. Yields a per-pixel confidence map + an undetermined_fraction —
 an honesty/UX signal for the human-in-the-loop (borrowed idea)."""
+import os
+import threading
+import time
+
 import numpy as np
+import pytest
 
 from app.shlif import uncertainty
 from app.pipeline import loader
@@ -40,3 +45,45 @@ def test_ensemble_uncertainty_reports_progress_per_perturbation():
 
     total = len(uncertainty._PERTURBATIONS)
     assert calls == [(i, total) for i in range(1, total + 1)]
+
+
+@pytest.mark.skipif(
+    (os.cpu_count() or 1) <= 1,
+    reason="needs >1 CPU to observe overlap",
+)
+def test_perturbations_run_concurrently(monkeypatch):
+    lock = threading.Lock()
+    current = [0]
+    max_concurrent = [0]
+
+    def fake_segment_phases(pre, cfg):
+        with lock:
+            current[0] += 1
+            max_concurrent[0] = max(max_concurrent[0], current[0])
+        time.sleep(0.05)
+        with lock:
+            current[0] -= 1
+        class _R:
+            labels = np.zeros(pre.shape[:2], np.uint8)
+        return _R()
+
+    monkeypatch.setattr(uncertainty, "segment_phases", fake_segment_phases)
+    rgb = np.zeros((16, 16, 3), np.uint8)
+    uncertainty.ensemble_phase_labels(rgb, CFG)
+
+    assert max_concurrent[0] >= 2, (
+        f"expected overlapping perturbation calls, max concurrent was {max_concurrent[0]}")
+
+
+def test_matches_manual_sequential_reference():
+    rgb = np.zeros((32, 32, 3), np.uint8)
+    rgb[8:24, 8:24] = 220
+    expected = np.stack([
+        uncertainty.segment_phases(
+            uncertainty.preprocess(uncertainty._perturb(rgb, gamma, gain), CFG.preprocess),
+            CFG.segment,
+        ).labels.astype(np.uint8)
+        for gamma, gain in uncertainty._PERTURBATIONS
+    ])
+    actual = uncertainty.ensemble_phase_labels(rgb, CFG)
+    assert np.array_equal(actual, expected)
