@@ -13,6 +13,16 @@ def test_panorama_runs(tmp_path):
     assert r["mode"] == "panorama"
     assert r["n_tiles"] >= 1
     assert r["verdict"]["ore_class"] in {"ordinary", "hard", "talcose", "review"}
+    # same metrics keys close-up produces, computed over the whole image
+    for key in ("sulfide_frac", "magnetite_frac", "matrix_frac", "talc_frac",
+                "normal_share", "fine_share", "confidence", "talc_share_est"):
+        assert key in r["verdict"]["metrics"]
+    # same top-level sort-card shape as closeup, not buried in metrics
+    assert set(r["sort"]["classes"]) <= {"ordinary", "hard", "talcose"}
+    assert r["sort"]["top"] in r["sort"]["classes"]
+    assert r["size"][0] > 0 and r["size"][1] > 0
+    assert r["native_size"][0] >= r["size"][0] and r["native_size"][1] >= r["size"][1]
+    assert isinstance(r["low_conf_zones"], list)
 
 
 @pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
