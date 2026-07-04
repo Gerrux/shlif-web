@@ -22,7 +22,7 @@ from app.shlif.imageio import load_rgb
 from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
 from app.shlif.talc import detect_talc
-from app.shlif.tiling import iter_tiles, tile_grid
+from app.shlif.tiling import iter_tiles, tile_blend_weight, tile_grid
 from app.pipeline import loader
 from app.core import paths
 
@@ -43,12 +43,18 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     dh, dw = disp.shape[:2]
     rx, ry = dw / Wt, dh / Ht
 
-    overlay = disp.astype(np.float32).copy()
+    base = disp.astype(np.float32)
+    # Feathered stitch: accumulate weight*colour per tile and normalise, so
+    # overlapping tiles blend seamlessly (no double-darkened overlap band, no hard
+    # seam between differently-classified neighbours) — borrowed feather pattern.
+    color_num = np.zeros((dh, dw, 3), np.float32)
+    weight_den = np.zeros((dh, dw), np.float32)
     talc_disp = np.zeros((dh, dw), bool)
     records = []
     talc_px = matrix_px = 0
     n_tiles = n_ore = n_matrix = 0
     t0 = time.time()
+    sort_alpha = 0.32
 
     for tile in iter_tiles(path, cfg.tiling):
         n_tiles += 1
@@ -74,8 +80,9 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
             pd = {classes[i]: float(proba[i]) for i in range(len(classes))}
             records.append((pd, ore_px))
             col = np.array(SORT_RGB[max(pd, key=lambda k: pd[k])], np.float32)
-            reg = overlay[dy0:dy1, dx0:dx1]
-            overlay[dy0:dy1, dx0:dx1] = 0.68 * reg + 0.32 * col
+            wgt = tile_blend_weight(dy1 - dy0, dx1 - dx0)
+            color_num[dy0:dy1, dx0:dx1] += wgt[..., None] * col
+            weight_den[dy0:dy1, dx0:dx1] += wgt
         else:
             n_matrix += 1
         if talc.any():
@@ -89,7 +96,12 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     verdict = classes[int(sec.argmax())] if len(P) else "review"
     conf = float(sec.max()) if len(P) else 0.0
 
-    out = overlay.copy()
+    overlay = base.copy()
+    cov = weight_den > 0
+    if cov.any():
+        blended = color_num[cov] / weight_den[cov][..., None]
+        overlay[cov] = (1.0 - sort_alpha) * base[cov] + sort_alpha * blended
+    out = overlay
     out[talc_disp] = 0.68 * out[talc_disp] + 0.32 * np.array(TALC_RGB, np.float32)
     out = np.clip(out, 0, 255).astype(np.uint8)
 

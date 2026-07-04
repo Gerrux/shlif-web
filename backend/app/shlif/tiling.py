@@ -29,6 +29,27 @@ class Tile:
     empty: bool       # flagged as matrix-only and skipped by the caller
 
 
+def _edge_ramp(n: int, m: int) -> np.ndarray:
+    """1-D window: ramps (0,1] over ``m`` px at each end, flat 1 in the middle.
+    Never reaches 0, so a stitch can normalise by the summed weight safely."""
+    x = np.ones(n, np.float32)
+    m = min(m, n // 2)
+    if m > 0:
+        ramp = (np.arange(m, dtype=np.float32) + 1.0) / (m + 1.0)
+        x[:m] = ramp
+        x[-m:] = ramp[::-1]
+    return x
+
+
+def tile_blend_weight(h: int, w: int, margin_frac: float = 0.12) -> np.ndarray:
+    """2-D linear feather weight (``h×w``): 1 in the centre, ramping to ~0 over a
+    ``margin_frac`` margin at each edge. Used to blend overlapping tiles into the
+    panorama overlay seamlessly (borrowed feather pattern) — accumulate
+    ``weight*colour`` and divide by summed weight."""
+    return np.outer(_edge_ramp(h, int(round(h * margin_frac))),
+                    _edge_ramp(w, int(round(w * margin_frac))))
+
+
 def _is_empty(rgb: np.ndarray, bright_frac: float) -> bool:
     v = rgb.max(axis=2)
     thr = max(40, int(v.mean() + 2.0 * v.std()))
