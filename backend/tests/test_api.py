@@ -15,12 +15,13 @@ def _poll(c, jid):
 
 def test_closeup_analyze_and_edit(tiny_rgb):
     c = TestClient(app)
-    up = c.post("/api/analyze", data={"mode": "closeup"},
+    up = c.post("/api/analyze",
                 files={"image": ("t.png", _png_bytes(tiny_rgb), "image/png")})
     assert up.status_code == 200
     jid = up.json()["job_id"]
     done = _poll(c, jid)
     assert done["status"] == "done"
+    assert done["result"]["mode"] == "closeup"  # tiny_rgb (256x256) is well under direct_max_pixels
     assert done["result"]["verdict"]["ore_class"] in {"ordinary","hard","talcose","review"}
 
     # layers + maps are fetchable
