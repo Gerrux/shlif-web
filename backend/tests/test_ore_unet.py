@@ -86,3 +86,14 @@ def test_chunks_when_more_crops_than_batch_size():
     assert mask[512:1024, 0:512].all()
     assert not mask[0:512, :].any()
     assert not mask[512:1024, 512:1024].any()
+
+
+def test_use_amp_true_for_cuda_devices():
+    from app.shlif.ore_unet import _use_amp
+    assert _use_amp("cuda") is True
+    assert _use_amp("cuda:0") is True
+
+
+def test_use_amp_false_for_cpu():
+    from app.shlif.ore_unet import _use_amp
+    assert _use_amp("cpu") is False

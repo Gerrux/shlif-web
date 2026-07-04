@@ -30,6 +30,12 @@ _MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 _STD = np.array([0.229, 0.224, 0.225], np.float32)
 
 
+def _use_amp(device) -> bool:
+    """True when ``device`` names a CUDA device -- gates fp16 autocast; the
+    CPU fallback path must stay plain fp32."""
+    return str(device).startswith("cuda")
+
+
 def resolve_threshold(prob: np.ndarray, lo: float = 0.05, hi: float = 0.30,
                       k95: float = 0.85, k99: float = 0.55) -> float:
     """Adaptive sigmoid threshold for a talc probability map, clamped to ``[lo, hi]``.
@@ -61,6 +67,9 @@ def build_talc_unet(ckpt: str = TALC_CKPT, device: str | None = None):
         import torch
 
         dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if dev.startswith("cuda"):
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
         model = smp.Unet("resnet34", encoder_weights=None, in_channels=3, classes=1)
         model.load_state_dict(torch.load(ckpt, map_location=dev))
         return model.to(dev).eval(), dev
@@ -83,8 +92,14 @@ def talc_unet_mask(rgb: np.ndarray, model, device: str, thr: float | None = 0.5)
     im = cv2.resize(rgb, (SZ, SZ)).astype(np.float32) / 255.0
     im = (im - _MEAN) / _STD
     x = torch.from_numpy(im.transpose(2, 0, 1)[None].astype(np.float32)).to(device)
+    use_amp = _use_amp(device)
     with torch.inference_mode():
-        pr = torch.sigmoid(model(x))[0, 0].float().cpu().numpy()
+        if use_amp:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                pr = torch.sigmoid(model(x))[0, 0]
+        else:
+            pr = torch.sigmoid(model(x))[0, 0]
+        pr = pr.float().cpu().numpy()
     pr = cv2.resize(pr, (W, H))
     t = resolve_threshold(pr) if thr is None else float(thr)
     return pr >= t

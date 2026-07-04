@@ -24,6 +24,13 @@ _MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 _STD = np.array([0.229, 0.224, 0.225], np.float32)
 
 
+def _use_amp(device) -> bool:
+    """True when ``device`` names a CUDA device -- gates fp16 autocast, which
+    only helps (and is only valid) on CUDA; the CPU fallback path must stay
+    plain fp32."""
+    return str(device).startswith("cuda")
+
+
 def build_ore_unet(ckpt: str = ORE_CKPT, device: str | None = None):
     """Load the trained ore/matrix U-Net -> ``(model, device)``, or ``None``.
 
@@ -37,6 +44,9 @@ def build_ore_unet(ckpt: str = ORE_CKPT, device: str | None = None):
         import torch
 
         dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if dev.startswith("cuda"):
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
         model = smp.Unet("resnet34", encoder_weights=None, in_channels=3, classes=2)
         model.load_state_dict(torch.load(ckpt, map_location=dev))
         return model.to(dev).eval(), dev
@@ -80,10 +90,16 @@ def ore_unet_mask(rgb: np.ndarray, model, device: str, tile: int = 512,
         return ore
 
     batch = torch.from_numpy(np.stack(crops)).to(device)
+    use_amp = _use_amp(device)
     with torch.inference_mode():
         for start in range(0, len(crops), batch_size):
             chunk = batch[start:start + batch_size]
-            preds = model(chunk).argmax(1).cpu().numpy()
+            if use_amp:
+                with torch.autocast(device_type="cuda", dtype=torch.float16):
+                    logits = model(chunk)
+            else:
+                logits = model(chunk)
+            preds = logits.argmax(1).cpu().numpy()
             for i, p in enumerate(preds):
                 (y, x), (ch, cw) = coords[start + i], dims[start + i]
                 ore[y:y + ch, x:x + cw] = (p[:ch, :cw] != 0)
