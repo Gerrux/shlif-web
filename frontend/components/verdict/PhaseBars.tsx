@@ -2,6 +2,7 @@ import type { Verdict } from "@/lib/api/types";
 import { oreRu } from "@/lib/ore";
 const ROWS: [string, string, string][] = [
   ["Доля талька", "talc_frac", "var(--phase-talc-ink)"],
+  ["Тальк · оценка доли", "talc_share_est", "var(--phase-talc-ink)"],
   ["Тонкие срастания", "fine_share", "var(--phase-fine-ink)"],
   ["Обычные срастания", "normal_share", "var(--phase-normal-ink)"],
   ["Доля сульфидов", "sulfide_frac", "var(--text)"],
@@ -11,6 +12,7 @@ export function PhaseBars({ verdict }: { verdict: Verdict }) {
   const conf = m.confidence ?? 0;
   const normal = (m.normal_share ?? 0) * 100;
   const fine = (m.fine_share ?? 0) * 100;
+  const undet = m.undetermined_fraction;
   return (
     <div className="verdict">
       <div className="vh">
@@ -18,10 +20,14 @@ export function PhaseBars({ verdict }: { verdict: Verdict }) {
         <div className="cls"><span className={`oreclass ${verdict.ore_class}`}>{oreRu(verdict.ore_class)}</span></div>
       </div>
       <div className="vb">
-        {ROWS.map(([label, key, col]) => (
+        {ROWS.filter(([, key]) => m[key] !== undefined).map(([label, key, col]) => (
           <div className="kv" key={key}><span className="k">{label}</span>
             <span className="v" style={{ color: col }}>{((m[key] ?? 0) * 100).toFixed(1)}%</span></div>
         ))}
+        {undet !== undefined ? (
+          <div className="kv"><span className="k">Неопределённость</span>
+            <span className="v" style={{ color: "var(--muted)" }}>{(undet * 100).toFixed(1)}%</span></div>
+        ) : null}
         {normal + fine > 0 ? (
           <div className="stackbar" title="обычные / тонкие срастания">
             <span style={{ width: `${normal}%`, background: "var(--phase-normal)" }} />
@@ -34,7 +40,7 @@ export function PhaseBars({ verdict }: { verdict: Verdict }) {
           <span className="dot" style={{ background: conf >= 0.85 ? "var(--success)" : "var(--warn)" }} />
           уверенность {conf.toFixed(2)}
         </span>
-        <span>seg+rule</span>
+        <span>{undet !== undefined ? "ансамбль" : "seg+rule"}</span>
       </div>
     </div>
   );

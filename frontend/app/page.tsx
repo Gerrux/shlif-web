@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useAnalyze, useJob } from "@/lib/api/hooks";
-import { imageUrl } from "@/lib/api/client";
+import { imageUrl, reportUrl } from "@/lib/api/client";
 import type { Mode, Verdict } from "@/lib/api/types";
 import { VerdictPanel } from "@/components/verdict/VerdictPanel";
 import { Corrector } from "@/components/corrector/Corrector";
@@ -108,6 +108,11 @@ export default function Home() {
                 <button className="btn ghost" onClick={() => setEditing(true)}>
                   <IconEdit /> Доработать маски
                 </button>
+              ) : null}
+              {shown && jobId ? (
+                <a className="btn ghost" href={reportUrl(jobId)} target="_blank" rel="noopener noreferrer">
+                  ⬇ Скачать протокол (PDF)
+                </a>
               ) : null}
             </div>
           </div>

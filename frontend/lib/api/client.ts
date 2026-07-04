@@ -16,8 +16,9 @@ export async function getJob(id: string): Promise<Job> {
   return r.json();
 }
 export const maskUrl = (id: string, layer: "phases" | "talc") => `${base}/api/masks/${id}/${layer}.png`;
-export const mapUrl = (id: string, name: "superpixels" | "darkness") => `${base}/api/maps/${id}/${name}.png`;
+export const mapUrl = (id: string, name: "superpixels" | "darkness" | "confidence") => `${base}/api/maps/${id}/${name}.png`;
 export const imageUrl = (id: string) => `${base}/api/images/${id}.jpg`;
+export const reportUrl = (id: string) => `${base}/api/report/${id}.pdf`;
 
 export async function saveMasks(id: string, phases: Blob, talc: Blob): Promise<Verdict> {
   const fd = new FormData();
