@@ -63,6 +63,7 @@ export function Corrector({
   const [vis, setVis] = useState<Vis>({ sulfide: true, magnetite: true, talc: true });
   const visRef = useRef(vis); visRef.current = vis;
   const [grabbing, setGrabbing] = useState(false);
+  const [sideTab, setSideTab] = useState<"edit" | "report">("edit");
   const zp = useZoomPan();
 
   useEffect(() => {
@@ -148,7 +149,7 @@ export function Corrector({
   function moveCursor(e: React.PointerEvent) {
     const cd = cursorRef.current, vp = zp.vpRef.current, cv = canvasRef.current;
     if (!cd) return;
-    if (!vp || !cv || !state || (state.tool !== "brush" && state.tool !== "eraser")) { cd.style.display = "none"; return; }
+    if (!vp || !cv || !state || sideTab === "report" || (state.tool !== "brush" && state.tool !== "eraser")) { cd.style.display = "none"; return; }
     const vr = vp.getBoundingClientRect(), cr = cv.getBoundingClientRect();
     const d = state.brush * 2 * (cr.width / w);
     cd.style.display = "block";
@@ -160,7 +161,7 @@ export function Corrector({
     if ((e.target as Element).closest(".zoom-controls")) return; // клики по кнопкам зума не рисуют
     (e.target as Element).setPointerCapture?.(e.pointerId);
     if (!state) return;
-    if (e.button === 1 || state.tool === "pan") { setGrabbing(true); zp.startPan(e); return; }
+    if (sideTab === "report" || e.button === 1 || state.tool === "pan") { setGrabbing(true); zp.startPan(e); return; }
     const { cx, cy } = toCanvas(e);
     if (state.tool === "brush" || state.tool === "eraser") {
       const pre = snapshot(state);
@@ -213,13 +214,19 @@ export function Corrector({
     } finally { setSaving(false); }
   }
 
-  const vpClass = state?.tool === "pan" ? (grabbing ? "grabbing" : "grab")
+  const vpClass = sideTab === "report" || state?.tool === "pan" ? (grabbing ? "grabbing" : "grab")
     : (state?.tool === "brush" || state?.tool === "eraser") ? "paint" : "";
 
   return (
     <div className="workspace">
       <aside className="ws-side">
-        {info}
+        <div className="seg" role="group" aria-label="Раздел сайдбара">
+          <button type="button" className={sideTab === "edit" ? "active" : ""} aria-pressed={sideTab === "edit"}
+            onClick={() => setSideTab("edit")}>Редактирование</button>
+          <button type="button" className={sideTab === "report" ? "active" : ""} aria-pressed={sideTab === "report"}
+            onClick={() => setSideTab("report")}>Отчёт</button>
+        </div>
+        {sideTab === "report" ? info : (
         <div className="card">
           <div className="side-h">Редактор масок<span className="ann">{state ? `${state.brush}px` : "…"}</span></div>
           <div className="side-b">
@@ -287,6 +294,7 @@ export function Corrector({
             )}
           </div>
         </div>
+        )}
       </aside>
 
       <div className="ws-view">
