@@ -55,11 +55,17 @@ Stop the stack with `docker compose down`.
 cd backend
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -e '.[dev]'
+uv pip install --python .venv/bin/python 'scikit-learn==1.7.2'  # match the deployed classifier.pkl
 .venv/bin/granian --interface asgi --reload --host 0.0.0.0 --port 8000 main:app
 ```
 
 (`--reload` needs the `granian[reload]` extra — `uv pip install --python .venv/bin/python 'granian[reload]'`
 — if it's not already pulled in; drop the flag for a plain one-shot run.)
+
+> `pyproject.toml` only requires `scikit-learn>=1.4` (no lock file, no hard pin — see
+> `backend/app/shlif/VENDORED.md`), so a fresh `uv pip install` resolves to whatever's latest. Pin
+> to `1.7.2` locally to match what's actually used to train/pickle `backend/models/classifier.pkl`
+> — otherwise loading it prints a harmless but noisy `InconsistentVersionWarning` per estimator.
 
 Run the test suite:
 
