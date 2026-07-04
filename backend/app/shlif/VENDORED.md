@@ -1,6 +1,11 @@
 # Vendored `shlif` runtime package
-Copied from `hakaton_nornikel/shlif/` at source commit (see below). Training
-scripts stay in the origin repo. Only the runtime pipeline lives here.
+Copied from `hakaton_nornikel/shlif/` at source commit (see below). Full model
+training (feature-set research, U-Net training, etc.) stays in the origin repo
+— only the runtime pipeline lives here, plus the one local glue script
+(`backend/scripts/retrain_classifier.py`) needed to re-pickle the RF sort
+classifier whenever this vendored copy's `segment_phases`/`features.py`
+diverges from origin, since the classifier must stay in sync with whichever
+segmentation code actually runs here.
 Do NOT import `shlif.talc_unet` or torch at module top level — GPU is optional.
 
 Source commit: d044d1c733f99d986f5f2d46c406e6ce2d8d6660
