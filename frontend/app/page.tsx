@@ -8,7 +8,7 @@ import { Corrector } from "@/components/corrector/Corrector";
 import { Welcome } from "@/components/Welcome";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
-import { IconHex, IconAlert, IconDownload } from "@/components/icons";
+import { IconAlert, IconDownload } from "@/components/icons";
 
 const STATUS: Record<string, [string, string]> = {
   queued: ["queued", "в очереди"], running: ["running", "анализ"],
@@ -66,7 +66,7 @@ export default function Home() {
   return (
     <main className="app-main">
       <header className="topbar" style={{ flexWrap: "wrap" }}>
-        <div className="logo"><IconHex className="ico-md" /></div>
+        <div className="logo" aria-hidden="true">🚀</div>
         <div><div className="crumb">DATA FORCE · классификация руд</div><h1>Скажи мне кто твой шлиф</h1></div>
         <div className="grow" />
         {badgeKey && STATUS[badgeKey] ? (
