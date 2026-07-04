@@ -13,6 +13,7 @@ verdict should be double-checked. (Borrowed idea; adapted to the classical path.
 from __future__ import annotations
 
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -33,6 +34,7 @@ _N_PHASES = 3  # matrix / magnetite / sulfide
 _PHASE_RU = {phases.MATRIX: "матрица", phases.MAGNETITE: "магнетит", phases.SULFIDE: "сульфид"}
 
 _POOL: ThreadPoolExecutor | None = None
+_POOL_LOCK = threading.Lock()
 
 
 def _pool() -> ThreadPoolExecutor:
@@ -41,10 +43,13 @@ def _pool() -> ThreadPoolExecutor:
     potentially thousands of times per gigapixel panorama. segment_phases and
     its preprocessing are cv2/numpy/skimage calls on large arrays, which
     release the GIL, so threads (not processes) give real parallelism here
-    without pickling/IPC overhead per tile."""
+    without pickling/IPC overhead per tile. Uses double-checked locking to
+    ensure thread-safe initialization."""
     global _POOL
     if _POOL is None:
-        _POOL = ThreadPoolExecutor(max_workers=min(len(_PERTURBATIONS), os.cpu_count() or 1))
+        with _POOL_LOCK:
+            if _POOL is None:
+                _POOL = ThreadPoolExecutor(max_workers=min(len(_PERTURBATIONS), os.cpu_count() or 1))
     return _POOL
 
 
