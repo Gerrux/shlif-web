@@ -1,0 +1,25 @@
+# Static fallback routes (file provider), mirrors the docker-label config in
+# docker-compose.yml. See traefik/traefik.yml comment + task-3-report.md for why.
+http:
+  routers:
+    api:
+      rule: "PathPrefix(`/api`)"
+      entryPoints:
+        - web
+      service: api
+      priority: 100
+    web:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - web
+      service: web
+      priority: 1
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000"
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://web:3000"

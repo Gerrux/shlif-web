@@ -1,0 +1,6 @@
+# Loaded automatically by `docker compose`. Keeps local dev CPU-only.
+# For the GPU VM, run: docker compose -f docker-compose.yml up  (skip the override).
+services:
+  api:
+    environment:
+      - SHLIF_FORCE_CPU=1
