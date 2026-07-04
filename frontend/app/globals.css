@@ -245,7 +245,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .welcome-title .wm { color: oklch(98% 0.006 250); }
 .welcome-title .rocket { filter: drop-shadow(0 4px 14px oklch(60% 0.16 60 / .5)); }
 .welcome-tagline { margin: 16px 0 0; font-size: clamp(16px, 2.3vw, 22px); font-weight: 500; color: oklch(87% 0.02 250); letter-spacing: -0.01em; }
-.welcome-desc { margin: 18px auto 32px; max-width: 620px; font-size: 15px; line-height: 1.62; color: oklch(74% 0.015 250); }
+.welcome-desc { margin: 18px auto 32px; max-width: 640px; font-size: 15px; line-height: 1.62; color: oklch(74% 0.015 250); text-align: left; }
+.welcome-desc p { margin: 0 0 14px; }
+.welcome-desc p:last-child { margin-bottom: 0; }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: center; }
 .welcome-cta .arrow { transition: transform .3s; }
 .welcome-cta:hover .arrow { transform: translateX(3px); }
@@ -255,8 +257,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .theme-float { position: fixed; top: 16px; right: 18px; z-index: 30; }
 
 /* Ссылки на команду внизу welcome-сцены */
-.welcome-credits { position: absolute; left: 0; right: 0; bottom: clamp(18px, 3.4vh, 32px); display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: center; font-size: 12.5px; }
+.welcome-credits { position: absolute; left: 0; right: 0; bottom: clamp(18px, 3.4vh, 32px); display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; font-size: 12.5px; }
 .welcome-credits .wc-label { color: oklch(58% 0.015 250); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+.welcome-credits .wc-links { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: center; }
 .welcome-credits .wc-link { display: inline-flex; align-items: center; gap: 6px; color: oklch(80% 0.02 250); text-decoration: none; transition: color .15s; }
 .welcome-credits .wc-link:hover { color: var(--brand); }
 

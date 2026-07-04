@@ -34,10 +34,30 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
           <span className="rocket">🚀</span>
         </h1>
         <p className="welcome-tagline">Скажи мне, кто твой шлиф</p>
-        <p className="welcome-desc">
-          Автоматическая классификация руд по панорамным OM-изображениям полированных шлифов:
-          сегментация сульфидных фаз, детекция талька и вердикт по экспертной логике.
-        </p>
+        <div className="welcome-desc">
+          <p>
+            Сервис определяет сорт руды по снимкам шлифов: рядовая, труднообогатимая или оталькованная.
+            Геолог загружает снимок и получает вердикт за секунды вместо часов ручной работы.
+          </p>
+          <p>
+            Сначала выравниваем освещение, потом нейросеть отделяет руду от породы, а классификатор
+            определяет сорт по размеру зерен сульфидов — крупные дают рядовую руду, мелкие труднообогатимую.
+            Логику вердикта нам подсказали сами геологи.
+          </p>
+          <p>
+            Точно выделить тальк по одному снимку физически нельзя, поэтому система показывает
+            зону-кандидат, а финальное решение остается за экспертом.
+          </p>
+          <p>
+            Любую маску можно поправить прямо в интерфейсе: кисть, ластик, автозаливка — и вердикт
+            пересчитывается на месте. Это и есть режим экспертной проверки из ТЗ.
+          </p>
+          <p>
+            На выходе — цветная маска, проценты по фазам, заключение и экспорт в PDF и CSV. Большие
+            панорамы обрабатываем по частям, сервис работает и на обычном компьютере, и на сервере
+            с видеокартой.
+          </p>
+        </div>
         <label
           className={`dropzone${drag ? " drag" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
@@ -53,11 +73,13 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
       </div>
       <div className="welcome-credits">
         <span className="wc-label">Команда</span>
-        {TEAM.map((m) => (
-          <a key={m.url} className="wc-link" href={m.url} target="_blank" rel="noopener noreferrer">
-            <IconTelegram className="ico-sm" />{m.name}
-          </a>
-        ))}
+        <div className="wc-links">
+          {TEAM.map((m) => (
+            <a key={m.url} className="wc-link" href={m.url} target="_blank" rel="noopener noreferrer">
+              <IconTelegram className="ico-sm" />{m.name}
+            </a>
+          ))}
+        </div>
       </div>
     </section>
   );
