@@ -7,6 +7,7 @@ import { VerdictPanel } from "@/components/verdict/VerdictPanel";
 import { Corrector } from "@/components/corrector/Corrector";
 import { Welcome } from "@/components/Welcome";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { IconHex, IconAlert, IconDownload } from "@/components/icons";
 
 const STATUS: Record<string, [string, string]> = {
@@ -17,6 +18,7 @@ const STATUS: Record<string, [string, string]> = {
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
   const [vOverride, setVOverride] = useState<Verdict | null>(null);
   const analyze = useAnalyze();
   const job = useJob(jobId);
@@ -25,6 +27,7 @@ export default function Home() {
     setFile(f);
     setVOverride(null);
     setJobId(null);
+    setStartedAt(Date.now());
     analyze.mutate({ file: f }, { onSuccess: (r) => setJobId(r.job_id) });
   }
 
@@ -86,10 +89,11 @@ export default function Home() {
                   <div className="sub">{job.data.message ?? "неизвестная ошибка"}</div>
                 </div>
               ) : (
-                <div className="stage-empty">
-                  <div className="hint">Анализ снимка…</div>
-                  <div className="sub">сегментация фаз</div>
-                </div>
+                <AnalysisProgress
+                  job={job.data}
+                  startedAt={startedAt ?? Date.now()}
+                  fallback={jobId ? "сегментация фаз" : "загрузка файла на сервер"}
+                />
               )}
             </div>
           </div>
