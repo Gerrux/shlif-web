@@ -19,3 +19,16 @@ export function cellIndices(labels: Uint16Array, seedIdx: number): number[] {
   for (let i = 0; i < labels.length; i++) if (labels[i] === id) out.push(i);
   return out;
 }
+// True where a pixel's segment id differs from its left or top neighbor — the
+// superpixel-grid outline, matching `_slic_boundaries` from the reference
+// annotate_talc.py tool.
+export function computeBoundaries(labels: Uint16Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if ((x > 0 && labels[i] !== labels[i - 1]) || (y > 0 && labels[i] !== labels[i - w])) out[i] = 1;
+    }
+  }
+  return out;
+}
