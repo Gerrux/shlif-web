@@ -15,3 +15,19 @@ export async function maskToPngBlob(mask: Uint8Array, w: number, h: number): Pro
 export function labelMapToBytes(map: Uint8Array): Uint8Array {
   return Uint8Array.from(map); // already 0/1/2 per pixel
 }
+// Convert a raw label map (e.g. phase ids 0/1/2) to a grayscale PNG blob whose
+// pixel value IS the label (not thresholded to 0/255 like maskToPngBlob).
+// The backend reads phases.png back as a raw uint8 label map, so this must
+// preserve values exactly.
+export async function rawMaskToPngBlob(map: Uint8Array, w: number, h: number): Promise<Blob> {
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  for (let i = 0; i < map.length; i++) {
+    const v = map[i];
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return new Promise((res) => cv.toBlob((b) => res(b as Blob), "image/png"));
+}

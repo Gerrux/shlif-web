@@ -14,7 +14,7 @@ def _persist_maps(jid, r):
     md = paths.masks_dir(jid); mp = paths.maps_dir(jid)
     (md / "phases.png").write_bytes(masks.encode_png_gray(r["phase_map"]))
     (md / "talc.png").write_bytes(masks.encode_png_gray((r["talc"].astype(np.uint8) * 255)))
-    (mp / "superpixels.png").write_bytes(masks.encode_png_u16(r["superpixels"]))
+    (mp / "superpixels.png").write_bytes(masks.encode_png_label_rgb(r["superpixels"]))
     (mp / "darkness.png").write_bytes(masks.encode_png_gray(r["darkness"]))
 
 @router.post("/analyze")

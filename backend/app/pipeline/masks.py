@@ -1,5 +1,6 @@
 from __future__ import annotations
-import cv2, numpy as np
+import io, cv2, numpy as np
+from PIL import Image
 from skimage.segmentation import slic
 from app.shlif import phases
 from app.shlif.analyze import verdict_from_masks
@@ -34,7 +35,11 @@ def decode_png_gray(data: bytes) -> np.ndarray:
     if arr is None: raise ValueError("png decode failed")
     return arr
 
-def encode_png_u16(arr: np.ndarray) -> bytes:
-    ok, buf = cv2.imencode(".png", arr.astype(np.uint16))
-    if not ok: raise RuntimeError("png u16 encode failed")
-    return buf.tobytes()
+def encode_png_label_rgb(labels: np.ndarray) -> bytes:
+    """Pack a uint16 label map into an 8-bit RGB PNG (R=high byte, G=low byte) so it
+    survives HTML-canvas getImageData (8-bit/channel) losslessly. Decode: (R<<8)|G."""
+    h, w = labels.shape
+    rgb = np.zeros((h, w, 3), np.uint8)
+    rgb[..., 0] = (labels.astype(np.uint16) >> 8) & 0xFF
+    rgb[..., 1] = labels.astype(np.uint16) & 0xFF
+    buf = io.BytesIO(); Image.fromarray(rgb, "RGB").save(buf, "PNG"); return buf.getvalue()
