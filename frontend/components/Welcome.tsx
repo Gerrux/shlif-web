@@ -1,20 +1,26 @@
 "use client";
-// Welcome-герой команды DATA FORCE. Тёмный микрофото-фон (принцип ДС: сцена тёмная),
-// имя команды текстом + эмодзи-ракета, сегмент режима и CTA-загрузка запускают анализ.
-import type { Mode } from "@/lib/api/types";
-import { IconUpload, IconArrow } from "@/components/icons";
+// Полноэкранный welcome команды DATA FORCE. Тёмный микрофото-фон (принцип ДС: сцена тёмная),
+// имя команды текстом + эмодзи-ракета, дроп-зона загрузки (drag&drop или клик). Режим
+// (крупный план / панорама) здесь не выбирается — переключается уже в рабочей зоне.
+import { useState } from "react";
+import { IconUpload } from "@/components/icons";
 
-const MODES: [Mode, string][] = [["closeup", "Крупный план"], ["panorama", "Панорама"]];
+export function Welcome({ onFile }: { onFile: (f: File) => void }) {
+  const [drag, setDrag] = useState(false);
 
-export function Welcome({
-  mode, onMode, onFile,
-}: {
-  mode: Mode;
-  onMode: (m: Mode) => void;
-  onFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
-}) {
+  function pickFromInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (f) onFile(f);
+  }
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDrag(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f && f.type.startsWith("image/")) onFile(f);
+  }
+
   return (
-    <section className="welcome" aria-label="DATA FORCE — классификация руд">
+    <section className="welcome full" aria-label="DATA FORCE — классификация руд">
       <div className="welcome-bg" />
       <div className="welcome-scrim" />
       <div className="welcome-inner">
@@ -28,20 +34,18 @@ export function Welcome({
           Автоматическая классификация руд по панорамным OM-изображениям полированных шлифов:
           сегментация сульфидных фаз, детекция талька и вердикт по экспертной логике.
         </p>
-        <div className="welcome-actions">
-          <div className="seg on-dark" role="group" aria-label="Режим анализа">
-            {MODES.map(([m, label]) => (
-              <button key={m} type="button" className={mode === m ? "active" : ""}
-                aria-pressed={mode === m} onClick={() => onMode(m)}>{label}</button>
-            ))}
-          </div>
-          <label className="btn primary lg welcome-cta">
-            <IconUpload className="ico-md" />
-            Загрузить шлиф
-            <IconArrow className="ico-md arrow" />
-            <input type="file" accept="image/*" onChange={onFile} style={{ display: "none" }} />
-          </label>
-        </div>
+        <label
+          className={`dropzone${drag ? " drag" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragEnter={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={onDrop}
+        >
+          <IconUpload className="ico-lg dz-ico" />
+          <span className="dz-title">Перетащите снимок шлифа сюда</span>
+          <span className="dz-sub">или нажмите, чтобы выбрать · JPG / PNG · OM, отражённый свет</span>
+          <input type="file" accept="image/*" onChange={pickFromInput} style={{ display: "none" }} />
+        </label>
       </div>
     </section>
   );

@@ -254,6 +254,52 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .welcome-cta .arrow { transition: transform .3s; }
 .welcome-cta:hover .arrow { transform: translateX(3px); }
 @media (prefers-reduced-motion: reduce) { .welcome-badge .ping::before, .welcome:hover .welcome-bg { animation: none; transition: none; } }
+/* Полноэкранный welcome */
+.welcome.full { min-height: 100dvh; border-radius: 0; border: 0; margin: 0; padding: clamp(40px, 8vh, 96px) 24px; }
+.theme-float { position: fixed; top: 16px; right: 18px; z-index: 30; }
+
+/* Дроп-зона загрузки */
+.dropzone { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 82vw); padding: 40px 28px; border-radius: 16px; border: 1.5px dashed oklch(100% 0 0 / .3); background: oklch(100% 0 0 / .04); color: oklch(88% 0.02 250); cursor: pointer; text-align: center; transition: border-color .15s, background .15s, transform .15s; backdrop-filter: blur(4px); }
+.dropzone:hover { border-color: var(--brand); background: oklch(100% 0 0 / .07); }
+.dropzone.drag { border-color: var(--brand); background: color-mix(in oklab, var(--brand) 16%, transparent); transform: scale(1.02); }
+.dropzone .dz-ico { color: var(--brand-2); }
+.dropzone .dz-title { font-size: 16px; font-weight: 600; color: #fff; }
+.dropzone .dz-sub { font-size: 12.5px; color: oklch(72% 0.015 250); font-family: var(--font-mono); }
+
+/* ---- Рабочая зона: сайдбар + просмотрщик ---- */
+.workspace { display: grid; grid-template-columns: 344px minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 960px) { .workspace { grid-template-columns: 1fr; } }
+.ws-side { display: grid; gap: 14px; align-content: start; }
+.ws-view { min-width: 0; display: grid; gap: 10px; }
+.side-h { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.side-h .ann { font-family: var(--font-mono); font-size: 11px; color: var(--muted); font-weight: 500; }
+.side-b { padding: 14px 16px; }
+.meta-rows { display: grid; gap: 8px; }
+.meta-rows .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.meta-rows .kv .k { color: var(--text-2); } .meta-rows .kv .v { font-family: var(--font-mono); font-weight: 600; }
+.tool-group { display: grid; gap: 9px; }
+.tool-group + .tool-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+
+/* Панель слоёв: выбор активного слоя (клик) + видимость (глаз) */
+.layers { display: grid; gap: 3px; }
+.layer-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: 13px; text-align: left; background: transparent; font-family: inherit; color: var(--text); }
+.layer-row:hover { background: var(--surface-2); }
+.layer-row.active { background: var(--brand-soft); border-color: color-mix(in oklab, var(--brand) 24%, var(--surface)); }
+.layer-row .sw { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; box-shadow: inset 0 0 0 1px oklch(0% 0 0 / .18); }
+.layer-row .nm { flex: 1; }
+.layer-row.off .sw { opacity: .28; } .layer-row.off .nm { color: var(--muted); }
+.layer-row .eye { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: var(--muted); border: 0; background: transparent; cursor: pointer; flex-shrink: 0; }
+.layer-row .eye:hover { background: var(--surface-3); color: var(--text); }
+
+/* ---- Просмотрщик с зумом ---- */
+.zoom-vp { position: relative; overflow: hidden; background: var(--stage); border: 1px solid var(--stage-line); border-radius: 12px; touch-action: none; user-select: none; }
+.zoom-content { transform-origin: 0 0; will-change: transform; }
+.zoom-content canvas, .zoom-content img { display: block; width: 100%; height: auto; }
+.zoom-vp.grab { cursor: grab; } .zoom-vp.grabbing { cursor: grabbing; } .zoom-vp.paint { cursor: none; }
+.brush-cursor { position: absolute; border: 2px solid oklch(100% 0 0 / .95); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; mix-blend-mode: difference; z-index: 4; }
+.zoom-controls { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; z-index: 5; }
+.zoom-level { position: absolute; left: 12px; bottom: 12px; z-index: 5; font-family: var(--font-mono); font-size: 11px; color: oklch(82% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 3px 8px; backdrop-filter: blur(6px); }
+.zoom-hint { position: absolute; left: 12px; top: 12px; z-index: 5; font-family: var(--font-mono); font-size: 11px; color: oklch(78% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 4px 9px; backdrop-filter: blur(6px); pointer-events: none; }
 
 /* ---- Сетка экрана ---- */
 .mode-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 18px; }
