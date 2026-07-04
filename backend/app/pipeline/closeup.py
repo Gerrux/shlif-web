@@ -33,6 +33,7 @@ def analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict:
         res = analyze_image(rgb, cfg, detect_talc_flag=True)  # classical talc seed
     m = res.masks
     phase_map = masks.phase_label_map(m["sulfide"], m["magnetite"])
+    intergrowth = masks.intergrowth_label_map(m["normal"], m["fine"])
 
     report(0.30, "оценка неопределённости")
 
@@ -56,6 +57,7 @@ def analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict:
         "sort": sort,
         "phase_map": phase_map,
         "talc": m["talc"].astype(bool),
+        "intergrowth": intergrowth,
         "superpixels": superpixels,
         "darkness": darkness,
         "confidence": unc["confidence"],

@@ -11,7 +11,7 @@ router = APIRouter()
 @router.get("/masks/{jid}/{layer}.png")
 def get_mask(jid: str, layer: str):
     p = paths.masks_dir(jid) / f"{layer}.png"
-    if layer not in {"phases", "talc"} or not p.exists():
+    if layer not in {"phases", "talc", "intergrowth"} or not p.exists():
         raise HTTPException(404, "mask not found")
     return FileResponse(p, media_type="image/png")
 
@@ -35,6 +35,7 @@ async def save_masks(jid: str, phases: UploadFile = File(...), talc: UploadFile 
     tk = M.decode_png_gray(await talc.read()) > 127
     paths.masks_dir(jid).joinpath("phases.png").write_bytes(M.encode_png_gray(pm))
     paths.masks_dir(jid).joinpath("talc.png").write_bytes(M.encode_png_gray(tk.astype(np.uint8) * 255))
+    orig_h, orig_w = pm.shape  # editor resolution — intergrowth.png must match this, not native
 
     job = get_runtime().store.get(jid)
     native = (job.result or {}).get("native_size") if job else None
@@ -46,5 +47,9 @@ async def save_masks(jid: str, phases: UploadFile = File(...), talc: UploadFile 
     su, mg, mx = M.split_phase_map(pm)
     cfg = loader.get_config()
     v = M.verdict_from_masks_dict(su, mg, mx, tk & mx, cfg)
+    intergrowth = v.pop("intergrowth")
+    if intergrowth.shape != (orig_h, orig_w):
+        intergrowth = cv2.resize(intergrowth, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+    paths.masks_dir(jid).joinpath("intergrowth.png").write_bytes(M.encode_png_gray(intergrowth))
     get_runtime().store.log_correction(jid, "phases+talc", int(pm.size))
     return v

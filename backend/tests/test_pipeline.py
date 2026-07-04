@@ -9,6 +9,8 @@ def test_analyze_closeup_structure(tiny_rgb):
     assert r["phase_map"].shape == tiny_rgb.shape[:2]
     assert set(np.unique(r["phase_map"])) <= {0, 1, 2}
     assert r["talc"].shape == tiny_rgb.shape[:2]
+    assert r["intergrowth"].shape == tiny_rgb.shape[:2]
+    assert set(np.unique(r["intergrowth"])) <= {0, 1, 2}
     assert r["superpixels"].shape == tiny_rgb.shape[:2]
     assert r["darkness"].shape == tiny_rgb.shape[:2]
     assert r["sort"] is None or set(r["sort"]["classes"]) <= {"ordinary", "hard", "talcose"}

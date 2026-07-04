@@ -19,6 +19,8 @@ import { darkSegmentsMask } from "@/lib/mask/darkpercent";
 const PHASE_RGB: Record<number, [number, number, number]> = { 1: [150, 160, 182], 2: [201, 180, 95] };
 const TALC_RGB: [number, number, number] = [79, 143, 240];
 const DARK_RGB: [number, number, number] = [200, 60, 220];
+const NORMAL_RGB: [number, number, number] = [63, 174, 107];
+const FINE_RGB: [number, number, number] = [224, 85, 78];
 const TOOLS: [Tool, string][] = [
   ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["pan", "Рука"],
 ];
@@ -52,6 +54,7 @@ export function Corrector({
   const spRef = useRef<Uint16Array | null>(null);
   const spBoundaryRef = useRef<Uint8Array | null>(null);
   const darkRef = useRef<Uint8Array | null>(null);
+  const intergrowthRef = useRef<Uint8Array | null>(null);
   // Пиксельный конвейер: базовый снимок RGBA кэшируется один раз; композит наложения
   // считается инкрементально (только изменённые пиксели) и блитится раз в кадр (rAF).
   const baseRGBA = useRef<Uint8ClampedArray | null>(null);
@@ -77,6 +80,7 @@ export function Corrector({
   const [spAction, setSpAction] = useState<"Ставить" | "Убирать">("Ставить");
   const [grabbing, setGrabbing] = useState(false);
   const [sideTab, setSideTab] = useState<"edit" | "report">("report");
+  const sideTabRef = useRef(sideTab); sideTabRef.current = sideTab;
   const zp = useZoomPan();
 
   useEffect(() => {
@@ -92,6 +96,11 @@ export function Corrector({
       spRef.current = await loadSuperpixels(mapUrl(jobId, "superpixels"), w, h);
       spBoundaryRef.current = computeBoundaries(spRef.current, w, h);
       darkRef.current = await pngToArray(mapUrl(jobId, "darkness"), w, h);
+      try {
+        intergrowthRef.current = await pngToArray(maskUrl(jobId, "intergrowth"), w, h);
+      } catch {
+        intergrowthRef.current = null; // job predates this layer — report tab shows the clean photo, no tint
+      }
       const st = initState(Uint8Array.from(phasesGray), Uint8Array.from(talc.map((v) => (v > 127 ? 1 : 0))), w, h);
       srcRef.current = { pm: st.phaseMap, tc: st.talc };
       setState(st);
@@ -110,7 +119,7 @@ export function Corrector({
       requestDraw();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.phaseMap, state?.talc, vis, maskAlpha, spMode]);
+  }, [state?.phaseMap, state?.talc, vis, maskAlpha, sideTab, spMode]);
 
   // Яркость/CLAHE — приводим базовый снимок один раз в закэшированный буфер;
   // composePixel всегда читает его вместо необработанного baseRGBA.
@@ -144,17 +153,33 @@ export function Corrector({
   function composePixel(pm: Uint8Array, tc: Uint8Array, i: number) {
     const b = (enhancedRGBA.current ?? baseRGBA.current)!, o = outRef.current!.data; const j = i * 4;
     let r = b[j], g = b[j + 1], bl = b[j + 2];
-    const cls = pm[i], v = visRef.current, a = maskAlphaRef.current;
-    if ((cls === 2 && v.sulfide) || (cls === 1 && v.magnetite)) {
-      const c = PHASE_RGB[cls];
-      r = (1 - a) * r + a * c[0]; g = (1 - a) * g + a * c[1]; bl = (1 - a) * bl + a * c[2];
-    }
-    if (tc[i] && v.talc) {
-      r = (1 - a) * r + a * TALC_RGB[0]; g = (1 - a) * g + a * TALC_RGB[1]; bl = (1 - a) * bl + a * TALC_RGB[2];
-    }
-    const dm = darkMaskRef.current;
-    if (dm && dm[i] && !tc[i]) {
-      r = 0.5 * r + 0.5 * DARK_RGB[0]; g = 0.5 * g + 0.5 * DARK_RGB[1]; bl = 0.5 * bl + 0.5 * DARK_RGB[2];
+    const a = maskAlphaRef.current;
+    if (sideTabRef.current === "report") {
+      // Отчёт: всегда все 3 цвета по ТЗ (обычные/тонкие/тальк) — фиксированный
+      // интерпретируемый вид, не зависит от глазков видимости редактора.
+      const ig = intergrowthRef.current;
+      const cls = ig ? ig[i] : 0;
+      if (cls === 1) {
+        r = (1 - a) * r + a * NORMAL_RGB[0]; g = (1 - a) * g + a * NORMAL_RGB[1]; bl = (1 - a) * bl + a * NORMAL_RGB[2];
+      } else if (cls === 2) {
+        r = (1 - a) * r + a * FINE_RGB[0]; g = (1 - a) * g + a * FINE_RGB[1]; bl = (1 - a) * bl + a * FINE_RGB[2];
+      }
+      if (tc[i]) {
+        r = (1 - a) * r + a * TALC_RGB[0]; g = (1 - a) * g + a * TALC_RGB[1]; bl = (1 - a) * bl + a * TALC_RGB[2];
+      }
+    } else {
+      const cls = pm[i], v = visRef.current;
+      if ((cls === 2 && v.sulfide) || (cls === 1 && v.magnetite)) {
+        const c = PHASE_RGB[cls];
+        r = (1 - a) * r + a * c[0]; g = (1 - a) * g + a * c[1]; bl = (1 - a) * bl + a * c[2];
+      }
+      if (tc[i] && v.talc) {
+        r = (1 - a) * r + a * TALC_RGB[0]; g = (1 - a) * g + a * TALC_RGB[1]; bl = (1 - a) * bl + a * TALC_RGB[2];
+      }
+      const dm = darkMaskRef.current;
+      if (dm && dm[i] && !tc[i]) {
+        r = 0.5 * r + 0.5 * DARK_RGB[0]; g = 0.5 * g + 0.5 * DARK_RGB[1]; bl = 0.5 * bl + 0.5 * DARK_RGB[2];
+      }
     }
     if (toolRef.current === "superpixel" && spBoundaryRef.current?.[i]) { r = 255; g = 255; bl = 0; }
     o[j] = r; o[j + 1] = g; o[j + 2] = bl; o[j + 3] = 255;
@@ -259,6 +284,8 @@ export function Corrector({
       const phaseBlob = await rawMaskToPngBlob(state.phaseMap, w, h);
       const talcBlob = await maskToPngBlob(state.talc, w, h);
       const v = await saveMasks(jobId, phaseBlob, talcBlob);
+      intergrowthRef.current = await pngToArray(maskUrl(jobId, "intergrowth"), w, h);
+      requestDraw();
       onVerdict(v);
     } finally { setSaving(false); }
   }
