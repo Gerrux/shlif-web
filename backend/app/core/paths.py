@@ -10,6 +10,7 @@ def uploads_dir() -> Path: return _ensure(settings.data_dir / "uploads")
 def images_dir() -> Path: return _ensure(settings.data_dir / "images")
 def masks_dir(job_id: str) -> Path: return _ensure(settings.data_dir / "masks" / job_id)
 def maps_dir(job_id: str) -> Path: return _ensure(settings.data_dir / "maps" / job_id)
+def tiles_dir(job_id: str) -> Path: return _ensure(settings.data_dir / "tiles" / job_id)
 def db_path() -> Path:
     _ensure(settings.data_dir)
     return settings.data_dir / "shlif.db"
