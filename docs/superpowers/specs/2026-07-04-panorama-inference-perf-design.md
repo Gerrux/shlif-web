@@ -41,29 +41,47 @@ found insufficient. Phase 2 is **out of scope** for this spec.
 
 ## Architecture
 
-No structural change to `_run_panorama`'s tile loop: tiles are still visited
-in the same order, the same accumulators (`color_num`, `weight_den`,
-`talc_disp`, `records`, `low_conf_zones`, counts) are updated the same way,
-and stitching is untouched. Only the **internals** of three call sites
-change:
+**Correction after re-reading the current code** (the branch this work is
+based on has moved past the state originally skimmed): `panorama.py` no
+longer paints a tile-coloured stitched overlay — that was removed in a later
+commit (report-classification-overlay design §4.3). It now runs **two**
+tile loops: `_assemble_masks` (classical-only whole-canvas mask
+reconstruction — out of scope here, not touched) and `_run_panorama` (the
+ore/matrix U-Net gate + `ensemble_uncertainty` + classifier, feeding the
+`sort` card and `low_conf_zones` — this is the loop Phase 1 targets).
+Both loops, and `ensemble_phase_labels`/`ensemble_uncertainty`, now take an
+`on_progress`/`on_step` callback for the job-progress UI. This does not
+change the plan's direction, but it does add one hard constraint: the
+existing test `test_uncertainty.py::test_ensemble_uncertainty_reports_progress_per_perturbation`
+asserts `on_step` fires in **exact** order `(1,total), (2,total), ...,
+(total,total)` — the parallelisation in Component 3 below must preserve that
+exact call order even though the underlying work now runs concurrently.
 
-- `ore_unet_mask(rgb, model, device, tile=512)` — same signature, same
-  per-tile call site in `panorama.py`, same return (bool HxW mask). Internals
-  go from a sequential per-crop loop to one batched (or chunked-batched)
-  forward pass.
+No other structural change to `_run_panorama`'s tile loop: tiles are still
+visited in the same order, `records`/`low_conf_zones`/counts are updated the
+same way. Only the **internals** of three call sites change:
+
+- `ore_unet_mask(rgb, model, device, tile=512)` — same signature (plus one
+  new optional `batch_size` parameter), same per-tile call site in
+  `panorama.py` (`~ore_unet_mask(rgb, ore_model, ore_device)`), same return
+  (bool HxW mask). Internals go from a sequential per-crop loop to one
+  batched (or chunked-batched) forward pass.
 - `ore_unet_mask` / `talc_unet_mask` forward passes — wrapped in
   `torch.autocast` on CUDA only; CPU path unaffected.
-- `ensemble_phase_labels(rgb, cfg, perturbations)` — same signature and
-  return (a `(K, H, W)` label stack), internals go from a sequential `for`
-  loop to a persistent thread-pool `map`.
+- `ensemble_phase_labels(rgb, cfg, perturbations, on_step)` — same
+  signature and return (a `(K, H, W)` label stack), internals go from a
+  sequential `for` loop to submitting all perturbations to a persistent
+  thread pool up front, then resolving `.result()` **in original order**
+  (not completion order) so `on_step` keeps firing `1..total` in sequence —
+  see Component 3.
 - `backend/app/runtime.py` — one-line `max_workers` bump.
 
 Because none of these change what gets computed (same crops, same
-perturbations, same order of accumulation into the stitched output), the
+perturbations, same order of accumulation and progress reporting), the
 existing tests (`test_panorama_unet_gate.py`, `test_panorama.py`,
-`test_tiling_feather.py`, `test_panorama_aggregate.py`) keep passing
-unmodified — the panorama-level contract (`ore_unet_mask` invoked once per
-non-empty tile with that tile's full `rgb`) is preserved.
+`test_uncertainty.py`, `test_ore_unet.py`) keep passing unmodified — the
+panorama-level contract (`ore_unet_mask` invoked once per non-empty tile
+with that tile's full `rgb`) is preserved.
 
 ## Components
 
@@ -115,11 +133,17 @@ All of that is large-array cv2/numpy/skimage work that releases the GIL, so:
   re-created per call — this runs on every non-empty tile, potentially
   thousands of times per gigapixel panorama) sized
   `min(len(_PERTURBATIONS), os.cpu_count() or 1)`.
-- `ensemble_phase_labels` submits the 5 `(gamma, gain)` jobs to the pool and
-  stacks results in the original perturbation order (order matters for
-  reproducibility of `labels`, even though the aggregation in
-  `confidence_map`/`entropy_map` is order-independent — keep it stable
-  anyway for the equivalence test).
+- `ensemble_phase_labels` submits all 5 `(gamma, gain)` jobs to the pool
+  **up front** (so they actually run concurrently), then walks the
+  `futures` list in **original submission order**, calling `.result()`
+  (blocks only until that specific future is done) and — critically —
+  calling `on_step(i, total)` right after, in that same fixed order. This
+  preserves the exact `on_step` call sequence the existing progress-bar
+  test pins down, while still letting the pool run all 5 perturbations in
+  parallel (submission happens before any blocking `.result()` call).
+  Do **not** use `concurrent.futures.as_completed` for progress reporting —
+  its completion order is nondeterministic under threading and would break
+  `test_ensemble_uncertainty_reports_progress_per_perturbation`.
 - If measurement on the real L4 VM shows GIL contention still limiting
   gains, swapping the executor to `ProcessPoolExecutor` is a contained,
   same-call-site follow-up (noted here, not implemented in Phase 1).
@@ -152,23 +176,47 @@ perf-only change; no behavioural/verdict change is intended.
 
 ## Testing
 
-Existing tests unchanged and must keep passing:
-`test_panorama_unet_gate.py`, `test_panorama.py`, `test_tiling_feather.py`,
-`test_panorama_aggregate.py`.
+Existing tests unchanged and must keep passing, most importantly:
+`test_panorama_unet_gate.py` (per-tile `ore_unet_mask` call contract),
+`test_ore_unet.py` (guarded-`None` loader contract), and
+`test_uncertainty.py::test_ensemble_uncertainty_reports_progress_per_perturbation`
+(exact `on_step` ordering — the one existing test this change could plausibly
+break if the pool were wired up naively via completion order).
 
 New tests:
 
-- `ore_unet_mask` batched-vs-sequential equivalence: a deterministic stub
-  model (e.g. one that returns a fixed/known argmax pattern per crop
-  position) run over a synthetic multi-crop tile (e.g. 1024×1024 with
-  `tile=512` → 2×2=4 crops), asserting the batched output matches a
-  hand-computed per-crop-reference result.
-- `ensemble_phase_labels` parallel-vs-sequential equivalence: same `rgb`
-  input run through both the threaded and a reference sequential
-  implementation, asserting identical `(K, H, W)` label stacks (same order).
-- `JobRunner` max_workers bump: no new test needed (trivial constructor
-  argument, already exercised implicitly by existing job tests if any; a
-  targeted test asserting `max_workers == 2` is optional/low value).
+- `ore_unet_mask` batching mechanics: a counting stub model (records the
+  batch size of every forward-pass call) run over a synthetic multi-crop
+  tile (1024×1024 with `tile=512` → 2×2=4 crops), asserting (a) all crops
+  land in a single batched call when they fit under `batch_size`, (b) a
+  smaller `batch_size` produces the expected number of chunks, and (c) each
+  crop's prediction still lands in the correct output region (content-based:
+  a bright quadrant vs. dark quadrants, with `wb_clahe` stubbed to identity
+  so the test doesn't depend on CLAHE's behaviour on a degenerate flat
+  input). This genuinely fails against the current per-crop-loop
+  implementation (which has no `batch_size` parameter and calls the model
+  once per crop), giving real TDD red→green for a perf-only change.
+- `ensemble_phase_labels` concurrency: a fake `segment_phases` that records
+  how many calls are in flight at once (via a lock + counter + short sleep)
+  proves ≥2 run concurrently — fails against today's sequential loop
+  (max concurrent stays 1), passes once pooled.
+- `ensemble_phase_labels` correctness safety net: a manual reference
+  computed by calling `_perturb`/`preprocess`/`segment_phases` directly in
+  the test for each of `_PERTURBATIONS`, asserting `np.array_equal` against
+  `ensemble_phase_labels`'s output — order-preserving equivalence.
+- `JobRunner` max_workers bump: a small test constructing `Runtime()` (with
+  `paths.db_path` monkeypatched to a tmp path) and asserting
+  `rt.runner._pool._max_workers == 2`.
+
+**Sandbox caveat:** this dev sandbox has no `torch` installed (it's an
+optional, GPU-flavoured dependency — `torch==2.5.1+cu121` only resolves via
+the `download.pytorch.org/whl/cu121` index used at deploy time). The
+`ore_unet_mask` batching tests use `pytest.importorskip("torch")` and will
+show as **skipped** here, exactly like the existing `torch`-dependent tests
+already do in this environment. They should be run for real on a machine
+with `torch` installed (CPU build is enough to validate batching mechanics;
+only the fp16 autocast path needs real CUDA). The `ensemble_phase_labels`
+and `JobRunner` tests need no `torch` and run fully in this sandbox.
 
 ## Rollout / measurement
 
