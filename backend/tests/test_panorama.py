@@ -64,3 +64,21 @@ def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
     r = panorama.analyze_panorama(str(p), cfg, "unettest")
     assert r["mode"] == "panorama"
     assert len(calls) > 0  # the U-Net talc path was actually exercised, not skipped
+
+
+@pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
+def test_panorama_survives_tile_pyramid_failure(tmp_path, monkeypatch):
+    """A broken tile pyramid must never take down the whole analysis — it's
+    a display enhancement, not part of the verdict."""
+    img = (np.random.default_rng(4).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+    img[100:400, 100:400] = 210
+    p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
+    cfg = loader.get_config()
+
+    def boom(arr, jid):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(panorama.tiles, "build_pyramid", boom)
+
+    r = panorama.analyze_panorama(str(p), cfg, "pyramidfailtest")
+    assert r["mode"] == "panorama"
+    assert r["verdict"]["ore_class"] in {"ordinary", "hard", "talcose", "review"}

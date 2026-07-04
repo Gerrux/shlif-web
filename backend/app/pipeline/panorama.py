@@ -38,7 +38,7 @@ from app.shlif.ore_unet import ore_unet_mask
 from app.shlif.talc_unet import talc_unet_mask
 from app.shlif.tiling import axis_core_bounds, count_tiles, iter_tiles, load_working_array, tile_blend_weight, tile_grid
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
-from app.pipeline import loader, masks
+from app.pipeline import loader, masks, tiles
 from app.core import paths
 
 SORT_RGB = {"ordinary": (80, 190, 120), "hard": (225, 85, 80), "talcose": (95, 140, 235)}
@@ -273,6 +273,11 @@ def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
     verdict["metrics"]["undetermined_fraction"] = run["undetermined_fraction"]
     report(0.85, "сохранение оверлея")
     Image.fromarray(run["overlay"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
+
+    try:
+        tiles.build_pyramid(arr, jid)
+    except Exception as e:
+        print(f"panorama tile pyramid failed for job {jid}: {e}")
 
     edit = run["edit_rgb"]
     eh, ew = edit.shape[:2]
