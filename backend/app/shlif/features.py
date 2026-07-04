@@ -21,6 +21,7 @@ from skimage.morphology import skeletonize
 
 from .preprocess import preprocess
 from .segment import segment_phases
+from .talc import strip_annotation
 
 WORK_LONG_SIDE = 1600
 REF_MAG = 10.0
@@ -144,6 +145,7 @@ def extract_features(rgb: np.ndarray, cfg, name: str = "") -> dict:
     Magnification is used only to normalise scale, never as a feature (it is
     sparse, unreliable, and class-correlated → would leak).
     """
+    rgb = strip_annotation(rgb, cfg.talc)  # inpaint any drawn marks so they don't leak into texture
     mag = magnification_from_name(name)
     pre = preprocess(scale_normalize(rgb, mag), cfg.preprocess)
     seg = segment_phases(pre, cfg.segment)

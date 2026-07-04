@@ -20,15 +20,49 @@ from scipy import ndimage as ndi
 
 
 def blue_line_mask(rgb: np.ndarray, cfg) -> np.ndarray:
-    """Boolean mask of the drawn blue annotation strokes."""
+    """Boolean mask of the drawn blue/cyan annotation strokes.
+
+    Blue strokes read B high with B≫R and B≫G. Some annotators draw in cyan, which
+    reads B≫R but B≈G, so the pure-blue rule misses it — we add a cyan branch
+    (B high, G high, both ≫ R) and union the two. The ``cyan_*`` thresholds fall
+    back to the blue ones when absent, so the vendored/origin config stays valid.
+    """
     r = rgb[..., 0].astype(int)
     g = rgb[..., 1].astype(int)
     b = rgb[..., 2].astype(int)
-    return (
+    blue = (
         (b > int(cfg.blue_b_min))
         & (b - r > int(cfg.blue_minus_r))
         & (b - g > int(cfg.blue_minus_g))
     )
+    cyan_b_min = int(getattr(cfg, "cyan_b_min", cfg.blue_b_min))
+    cyan_g_min = int(getattr(cfg, "cyan_g_min", cfg.blue_b_min))
+    cyan_minus_r = int(getattr(cfg, "cyan_minus_r", cfg.blue_minus_r))
+    cyan = (
+        (b > cyan_b_min)
+        & (g > cyan_g_min)
+        & (b - r > cyan_minus_r)
+        & (g - r > cyan_minus_r)
+    )
+    return blue | cyan
+
+
+def strip_annotation(rgb: np.ndarray, cfg, dilate: int = 3, radius: int = 4) -> np.ndarray:
+    """Inpaint hand-drawn blue/cyan annotation out of ``rgb`` (cv2 TELEA).
+
+    Keeps the drawn strokes from leaking into GLCM/LBP/granulometry features. The
+    stroke mask is dilated a little first so the anti-aliased fringe is covered.
+    Returns ``rgb`` unchanged (no copy) when there is no annotation, so a clean
+    upload pays nothing.
+    """
+    mask = blue_line_mask(rgb, cfg)
+    if not mask.any():
+        return rgb
+    m = mask.astype(np.uint8)
+    if dilate > 0:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate + 1, 2 * dilate + 1))
+        m = cv2.dilate(m, k)
+    return cv2.inpaint(np.ascontiguousarray(rgb), m, radius, cv2.INPAINT_TELEA)
 
 
 def talc_mask_from_contours(rgb: np.ndarray, cfg) -> np.ndarray:
