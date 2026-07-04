@@ -93,11 +93,12 @@ contention). Heavy compute runs off the event loop in a **threadpool** (`run_in_
 |---|---|
 | `POST /api/analyze` | multipart image + `mode` (`closeup`\|`panorama`) + params → `{job_id}`. Stores upload, enqueues async job. |
 | `GET /api/jobs/{id}` | poll `{status: queued\|running\|done\|error, progress, message?, result?}`. `result` = verdict + layer refs (see §4.3). |
-| `GET /api/masks/{id}/{layer}.png` | a single mask layer as PNG (talc/sulfide/magnetite/matrix/normal/fine/ore). |
+| `GET /api/masks/{id}/phases.png` | the phase **label map** (0=матрица/1=магнетит/2=сульфид) as an indexed PNG. |
+| `GET /api/masks/{id}/talc.png` | the talc binary overlay as PNG. |
 | `GET /api/maps/{id}/superpixels.png` | SLIC label map (16-bit PNG or packed binary) — fetched once, enables client-side superpixel toggling. |
 | `GET /api/maps/{id}/darkness.png` | 8-bit grayscale darkness map — fetched once, enables the client-side threshold ("тёмные области") tool. |
 | `GET /api/images/{id}.jpg` | source image, downscaled for display. |
-| `POST /api/masks/{id}/{layer}` | save an edited mask PNG → persist → **recompute verdict from current masks** → return updated verdict. Correction logged. |
+| `POST /api/masks/{id}` | save edited `phases.png` and/or `talc.png` → persist → **recompute the phase-composition verdict** (fractions + rule; sort card unchanged) → return updated verdict. Correction logged. |
 | `GET /api/health` | liveness + `{gpu: bool, models: {classifier, unet_ore, unet_talc}}`. |
 
 ### 4.2 Job model
@@ -116,8 +117,11 @@ contention). Heavy compute runs off the event loop in a **threadpool** (`run_in_
   classifier → verdict. GPU U-Nets used when present (`unet_ore`, `unet_talc`), else classical.
 - `panorama.py`: port of `run_panorama` — tile → RF sort per tile + U-Net matrix + talc candidates
   → section verdict + overlay.
-- `masks.py`: produce the per-layer masks + the SLIC label map + darkness map for the editor;
-  `recompute_verdict(masks)` re-runs the rule/fractions from (possibly edited) masks.
+- `masks.py`: produce the **phase label map** (матрица/магнетит/сульфид) + **talc binary
+  overlay** + the SLIC label map + darkness map for the editor; `recompute_verdict(phase_map,
+  talc)` re-runs the phase fractions + доля талька + rule from the (possibly edited) masks. The RF
+  sort classification is texture-based and computed once from the source image — it is **not** part
+  of the recompute.
 - GPU auto-detect via `torch.cuda.is_available()` guarded by a try/import so torch is optional.
 
 ### 4.4 Persistence & data layout
@@ -127,7 +131,8 @@ backend/data/
   shlif.db                      # sqlite: jobs, corrections
   uploads/{id}.{ext}            # original upload
   images/{id}.jpg               # downscaled display copy
-  masks/{id}/{layer}.png        # per-layer masks (edited overwrite the pipeline output)
+  masks/{id}/phases.png         # phase label map (edited overwrites the pipeline output)
+  masks/{id}/talc.png           # talc binary overlay (edited overwrites the pipeline output)
   maps/{id}/{superpixels,darkness}.png
 ```
 Corrections logged to a `corrections` table (id, layer, n_pixels_changed, ts) for later retraining
@@ -147,10 +152,22 @@ palette, IBM Plex Sans/Mono, dark scene, brass accent, semantic phase colours: g
 
 ### 5.1 The corrector (HTML `<canvas>`, multi-layer, all minerals)
 
-Edits **all** mask/mineral layers, not just talc.
+Edits **all** mask/mineral layers, not just talc — but with a consistent data model:
 
-- **Layer selector:** тальк · сульфид · магнетит · матрица · обычные срастания · тонкие
-  срастания · руда/матрица. The active layer is editable; the others render faint for context.
+- **Phases = one exclusive label map.** Every pixel is exactly one of **матрица / магнетит /
+  сульфид** (`shlif.phases` ints 0/1/2). Painting a region as сульфид removes it from матрица —
+  layers can't contradict each other. The active phase is what the brush/superpixel/threshold
+  tools assign.
+- **Тальк = a separate binary overlay**, because talc is a *dispersed sub-phase inside the matrix*,
+  not a mutually-exclusive phase. It has its own editable layer on top of the phase map.
+- **Derived, shown-but-not-painted:** обычные/тонкие срастания (texture-derived shares) and руда
+  (= сульфид ∪ магнетит) render for context but are **computed**, never hand-painted — editing
+  them by hand has no pipeline meaning.
+- **Layer selector** therefore offers: активная фаза (матрица/магнетит/сульфид) + тальк. Inactive
+  layers render faint.
+- **What an edit recomputes:** the RF **sort card is texture-based on the whole image and does NOT
+  change** when masks are edited; only the **phase-composition verdict** (fractions + доля талька +
+  rule → рядовая/труднообог./оталькованная) recomputes from the edited label map + talc overlay.
 - **Tools:**
   - **Суперпиксель** — click toggles a SLIC cell in/out of the active layer. The label map is
     fetched **once** (`/api/maps/{id}/superpixels.png`); lookups + toggles are client-side, so it
@@ -224,6 +241,9 @@ badge (not a crash) · idempotent mask overwrite on save · poll backoff on the 
 1. Repo scaffold + Traefik + compose skeleton (both compose files) — “hello” api + web behind Traefik.
 2. Backend: vendored `shlif`, `/health`, closeup `analyze` job + poll, mask + map endpoints.
 3. Frontend: upload → poll → verdict panel (design tokens).
-4. Corrector: canvas + layers + the four tools + undo/redo; Save → recompute verdict.
-5. Panorama mode wired through the same job/verdict path.
+4. Corrector: canvas + phase label map + talc overlay + the four tools + undo/redo; Save →
+   recompute phase-composition verdict. **Targets closeup images** (single field of view).
+5. Panorama mode wired through the same job/verdict path (auto result + overlay + section
+   verdict). Panorama **correction is coarse** — confirm/reject at display resolution;
+   full-resolution gigapixel pixel-editing is out of scope for v1.
 6. Tests + local end-to-end verify + README.
