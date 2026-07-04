@@ -34,7 +34,7 @@ _METRIC_ROWS = [
     ("matrix_frac", "Доля матрицы", "pct"),
     ("talc_frac", "Тальк (сегментатор)", "pct"),
     ("talc_share_est", "Тальк (оценка доли)", "pct"),
-    ("fine_share", "Тонкие срастания", "pct"),
+    ("fine_share", "Мелкие сульфиды (заперты)", "pct"),
     ("confidence", "Уверенность", "num"),
     ("undetermined_fraction", "Неопределённость", "pct"),
 ]

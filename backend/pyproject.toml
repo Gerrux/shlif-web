@@ -17,6 +17,12 @@ dependencies = [
     "pandas>=2.0",
     "pyyaml>=6.0",
     "reportlab>=4.0",
+    # cu121 (not the PyPI-default cu13x build): the deploy VM's driver 535 caps out
+    # at CUDA 12.2, so a newer default wheel loads but reports cuda False silently.
+    # Wheels only exist on download.pytorch.org/whl/cu121 (see Dockerfile).
+    "torch==2.5.1+cu121",
+    "torchvision==0.20.1+cu121",
+    "segmentation-models-pytorch>=0.4",
 ]
 
 [project.optional-dependencies]

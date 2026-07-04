@@ -33,3 +33,34 @@ def test_panorama_does_not_mutate_shared_config(tmp_path):
     p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
     panorama.analyze_panorama(str(p), loader.get_config(), "cfgtest")
     assert loader.get_config().talc.detect_dark_frac == before
+
+
+@pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
+def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
+    """When loader.load_talc_unet() has weights, _run_panorama's per-tile talc
+    decision must come from the U-Net (mask & matrix), not the classical
+    detect_talc. Checks the gate directly (was the U-Net actually called, and
+    did the classical detector never run) rather than a downstream metric:
+    the reported verdict's talc_frac comes from _assemble_masks, which is
+    classical-only regardless of the talc U-Net's availability (see this
+    module's docstring) — so a numeric assertion on r["talc_frac"] wouldn't
+    actually exercise this gate."""
+    img = (np.random.default_rng(3).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+    img[100:400, 100:400] = 210
+    p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
+    cfg = loader.get_config()
+
+    calls = []
+    def fake_talc_unet(rgb, model, device, thr=None):
+        calls.append(1)
+        return np.ones(rgb.shape[:2], bool)
+    monkeypatch.setattr(panorama.loader, "load_talc_unet", lambda: ("fake-model", "cpu"))
+    monkeypatch.setattr(panorama, "talc_unet_mask", fake_talc_unet)
+
+    def boom(*a, **k):
+        raise AssertionError("classical detect_talc must not run when the U-Net is available")
+    monkeypatch.setattr(panorama, "detect_talc", boom)
+
+    r = panorama.analyze_panorama(str(p), cfg, "unettest")
+    assert r["mode"] == "panorama"
+    assert len(calls) > 0  # the U-Net talc path was actually exercised, not skipped

@@ -19,6 +19,16 @@ services:
     volumes:
       - ./backend/data:/app/data
       - ./backend/models:/app/models
+    # exposes the host's NVIDIA L4 to the container (requires nvidia-container-toolkit
+    # on the host); torch/talc_unet/ore_unet auto-detect cuda vs cpu at load time, so
+    # this stays optional — the api still runs (on CPU) if the toolkit isn't present.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=PathPrefix(`/api`)"

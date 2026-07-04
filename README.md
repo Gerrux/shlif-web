@@ -92,7 +92,7 @@ Trained model artifacts are **not committed** (gitignored: `backend/models/`, `b
 | File | Enables | Without it |
 |---|---|---|
 | `classifier.pkl` | The ore-sort card (RandomForest, F1 0.84 / AUC 0.92) on close-ups **and** the section verdict on panoramas | Sort card shows a "classifier недоступен" note; panorama analyze returns a surfaced error |
-| `unet_ore.pt` *(planned)* | GPU ore/matrix segmentation — **not yet wired in this milestone** | No behaviour change: the pipeline always runs the classical multi-Otsu + Lab-colour segmenter (CPU) |
+| `unet_ore.pt` | Ore/matrix segmentation for the panorama ore gate (IoU 0.975 vs classical 0.81) | Panorama runs the classical multi-Otsu + Lab-colour segmenter (CPU) as a graceful fallback whenever the checkpoint or torch/segmentation-models-pytorch aren't available |
 | `unet_talc.pt` *(planned)* | GPU talc-zone detector — **not yet wired in this milestone** | No behaviour change: the pipeline always runs the classical darkness/texture talc heuristic |
 
 > **U-Net wiring is deferred.** The close-up and panorama pipelines run the **classical path
@@ -101,6 +101,14 @@ Trained model artifacts are **not committed** (gitignored: `backend/models/`, `b
 > output. The `analyze_image` hooks for injecting U-Net masks exist (`backend/app/shlif/analyze.py`,
 > params `ore_mask`/`talc_mask`) but no caller populates them yet; GPU inference wiring is planned
 > follow-up work. Only `classifier.pkl` affects results today (the sort card + panorama verdict).
+
+> **Update:** the panorama ore/matrix gate now uses `unet_ore.pt` when it — and
+> `torch`/`segmentation-models-pytorch` — are available (`backend/app/shlif/ore_unet.py`,
+> wired in `backend/app/pipeline/panorama.py::_run_panorama`). Neither package is a hard
+> dependency (not in `backend/pyproject.toml`, matching the existing `talc_unet.py`
+> convention) — install them only on a box that will actually run inference. The
+> magnetite/sulfide split inside the ore region, and `unet_talc.pt`/`unet_s2.pt`, remain
+> unwired as before.
 
 `GET /api/health` reports which of these files are **present on disk** (`"models": {"classifier":
 bool, "unet_ore": bool, "unet_talc": bool}`, an existence check — not a load/deserialize check)
@@ -117,11 +125,13 @@ The backend never hard-requires a GPU. `app.pipeline.loader.gpu_available()` che
 `SHLIF_FORCE_CPU=1` (set by the Compose override) short-circuits it to `False` regardless of
 hardware, and `torch` is an optional import throughout — `import app.shlif` and the whole test
 suite run with torch absent. In **this** milestone the analysis pipelines run the **classical
-(CPU) methods unconditionally**, so the service works end-to-end on CPU-only hardware with no
-model beyond `classifier.pkl`. The GPU U-Net path (auto-detect a CUDA device + the matching `.pt`
-checkpoint, branch into U-Net inference, else fall back to classical) is scaffolded — `gpu_available()`,
-the `/api/health` model flags, and the `analyze_image` `ore_mask`/`talc_mask` hooks are all in
-place — but the inference wiring itself is planned follow-up, not yet active (see the Models note
+(CPU) methods unconditionally** — except for the panorama ore/matrix gate, which now conditionally
+routes through the trained U-Net when it and torch are available (see the Models note above) — so
+the service works end-to-end on CPU-only hardware with no model beyond `classifier.pkl`. The GPU
+U-Net path (auto-detect a CUDA device + the matching `.pt` checkpoint, branch into U-Net inference,
+else fall back to classical) is scaffolded — `gpu_available()`, the `/api/health` model flags, and
+the `analyze_image` `ore_mask`/`talc_mask` hooks are all in place — but for close-up analysis and
+talc detection the inference wiring itself is planned follow-up, not yet active (see the Models note
 above).
 
 ## Architecture
