@@ -612,8 +612,22 @@ from app.shlif.imageio import load_rgb
 def _synthetic_section():
     rng = np.random.default_rng(3)
     img = rng.integers(8, 30, (1200, 2400, 3)).astype(np.uint8)  # dark matrix
-    img[100:400, 100:400] = 220     # bright sulfide blob
-    img[600:900, 1400:1900] = 120   # mid-grey magnetite blob, straddles tile seams below
+    # Bright sulfide blob straddling the x=448 core boundary that
+    # tile=512/overlap=64 produces (step=448, so core ends fall at
+    # 0/448/896/...) -- sized/positioned (not the naive [100:400,100:400])
+    # because a bigger/higher-contrast patch pushes `tiling._is_empty`'s
+    # adaptive threshold (mean + 2*std) above 255 on this bimodal image,
+    # which misflags the whole tile as empty (a pre-existing quirk of
+    # `_is_empty`, unrelated to `_assemble_masks` and out of scope here) and
+    # would hide the very seam behaviour this test checks.
+    img[100:300, 350:550] = 220
+    # Mid-grey magnetite blob straddling the y=896 core boundary instead (x
+    # safely inside the [896,1344) x-core so only the y-seam is exercised
+    # here) -- same `_is_empty` threshold-blowout risk applies to this blob
+    # too, so it's sized to stay well clear of it (verified empirically
+    # against the real `_is_empty`: both straddled tiles come back
+    # bright_frac ~0.12-0.13, thr ~100, non-empty).
+    img[800:1000, 1000:1200] = 120
     return img
 
 
@@ -634,9 +648,13 @@ def test_assemble_masks_partitions_every_pixel_exactly_once(tmp_path):
     assert total.shape == arr.shape[:2]
     assert (total == 1).all()  # exactly one phase per pixel — no gap, no double-write
 
-    # the seeded bright blob (which straddles a tile boundary at this tile size)
-    # must still be picked up as sulfide, not lost at the seam
-    assert assembled["sulfide"][100:400, 100:400].mean() > 0.5
+    # the seeded bright blob (which straddles an x-tile boundary at this tile
+    # size) must still be picked up as sulfide, not lost at the seam
+    assert assembled["sulfide"][100:300, 350:550].mean() > 0.5
+
+    # the seeded mid-grey blob (which straddles a y-tile boundary) must
+    # still be picked up as magnetite, not lost at the seam
+    assert assembled["magnetite"][800:1000, 1000:1200].mean() > 0.5
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
