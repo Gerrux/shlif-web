@@ -74,7 +74,7 @@ export function Corrector({
   const darkMaskRef = useRef<Uint8Array | null>(null);
   const [spAction, setSpAction] = useState<"Ставить" | "Убирать">("Ставить");
   const [grabbing, setGrabbing] = useState(false);
-  const [sideTab, setSideTab] = useState<"edit" | "report">("edit");
+  const [sideTab, setSideTab] = useState<"edit" | "report">("report");
   const zp = useZoomPan();
 
   useEffect(() => {
@@ -263,10 +263,10 @@ export function Corrector({
     <div className="workspace">
       <aside className="ws-side">
         <div className="seg" role="group" aria-label="Раздел сайдбара">
-          <button type="button" className={sideTab === "edit" ? "active" : ""} aria-pressed={sideTab === "edit"}
-            onClick={() => setSideTab("edit")}>Редактирование</button>
           <button type="button" className={sideTab === "report" ? "active" : ""} aria-pressed={sideTab === "report"}
             onClick={() => setSideTab("report")}>Отчёт</button>
+          <button type="button" className={sideTab === "edit" ? "active" : ""} aria-pressed={sideTab === "edit"}
+            onClick={() => setSideTab("edit")}>Редактирование</button>
         </div>
         {sideTab === "report" ? info : (
         <div className="card">
