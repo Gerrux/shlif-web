@@ -18,7 +18,7 @@ def get_mask(jid: str, layer: str):
 @router.get("/maps/{jid}/{name}.png")
 def get_map(jid: str, name: str):
     p = paths.maps_dir(jid) / f"{name}.png"
-    if name not in {"superpixels", "darkness"} or not p.exists():
+    if name not in {"superpixels", "darkness", "confidence"} or not p.exists():
         raise HTTPException(404, "map not found")
     return FileResponse(p, media_type="image/png")
 

@@ -16,6 +16,8 @@ def _persist_maps(jid, r):
     (md / "talc.png").write_bytes(masks.encode_png_gray((r["talc"].astype(np.uint8) * 255)))
     (mp / "superpixels.png").write_bytes(masks.encode_png_label_rgb(r["superpixels"]))
     (mp / "darkness.png").write_bytes(masks.encode_png_gray(r["darkness"]))
+    (mp / "confidence.png").write_bytes(
+        masks.encode_png_gray(np.clip(r["confidence"] * 255.0, 0, 255).astype(np.uint8)))
 
 @router.post("/analyze")
 async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
@@ -38,7 +40,8 @@ async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
         _persist_maps(jid, r)
         h, w = rgb.shape[:2]
         return {"mode": "closeup", "verdict": r["verdict"], "sort": r["sort"],
-                "text": r["text"], "size": [w, h]}
+                "text": r["text"], "size": [w, h],
+                "low_conf_zones": r["low_conf_zones"]}
 
     get_runtime().runner.submit(jid, work)
     return {"job_id": jid}
