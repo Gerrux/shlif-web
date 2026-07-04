@@ -11,6 +11,7 @@ import { Welcome } from "@/components/Welcome";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { IconAlert, IconDownload, IconUpload } from "@/components/icons";
+import { PanoramaZoomModal } from "@/components/PanoramaZoomModal";
 
 const STATUS: Record<string, [string, string]> = {
   queued: ["queued", "в очереди"], running: ["running", "анализ"],
@@ -84,6 +85,7 @@ function Home() {
           <IconDownload /> Скачать протокол (PDF)
         </a>
       ) : null}
+      {shown?.mode === "panorama" && jobId ? <PanoramaZoomModal jobId={jobId} /> : null}
     </>
   );
 

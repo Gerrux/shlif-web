@@ -43,7 +43,7 @@ from app.shlif.talc import dark_gray_phase, detect_talc
 from app.shlif.ore_unet import ore_unet_mask
 from app.shlif.tiling import axis_core_bounds, count_tiles, iter_tiles, load_working_array, tile_grid
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
-from app.pipeline import loader, masks
+from app.pipeline import loader, masks, tiles
 from app.core import paths
 
 ORE_DENSITY_PCT = 92.0  # global brightness percentile that separates ore flecks from silicate
@@ -242,6 +242,11 @@ def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
     verdict["metrics"]["undetermined_fraction"] = run["undetermined_fraction"]
     report(0.85, "сохранение изображения")
     Image.fromarray(run["edit_rgb"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
+
+    try:
+        tiles.build_pyramid(arr, jid)
+    except Exception as e:
+        print(f"panorama tile pyramid failed for job {jid}: {e}")
 
     edit = run["edit_rgb"]
     eh, ew = edit.shape[:2]

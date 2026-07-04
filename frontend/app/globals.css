@@ -314,6 +314,10 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .zoom-level { position: absolute; left: 12px; bottom: 12px; z-index: 5; pointer-events: none; font-family: var(--font-mono); font-size: 11px; color: oklch(82% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 3px 8px; backdrop-filter: blur(6px); }
 .zoom-hint { position: absolute; left: 12px; top: 12px; z-index: 5; font-family: var(--font-mono); font-size: 11px; color: oklch(78% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 4px 9px; backdrop-filter: blur(6px); pointer-events: none; }
 
+.deepzoom-modal { position: fixed; inset: 0; z-index: 50; background: oklch(10% 0.01 258 / .92); }
+.deepzoom-modal .osd-container { position: absolute; inset: 0; }
+.deepzoom-close { position: absolute; top: 16px; right: 18px; z-index: 2; }
+
 /* ---- Сетка экрана ---- */
 .mode-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 18px; }
 .grid2 { display: grid; grid-template-columns: 1.7fr 1fr; gap: 24px; align-items: start; }
