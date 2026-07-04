@@ -6,7 +6,7 @@ import {
 } from "./reducer";
 import { imageUrl, maskUrl, mapUrl, saveMasks } from "@/lib/api/client";
 import { maskToPngBlob, rawMaskToPngBlob } from "@/lib/mask/encode";
-import { loadSuperpixels, cellIndices } from "@/lib/mask/superpixel";
+import { loadSuperpixels, cellIndices, computeBoundaries } from "@/lib/mask/superpixel";
 import type { Verdict } from "@/lib/api/types";
 import { useZoomPan } from "@/lib/useZoomPan";
 import {
@@ -52,6 +52,7 @@ export function Corrector({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
   const spRef = useRef<Uint16Array | null>(null);
+  const spBoundaryRef = useRef<Uint8Array | null>(null);
   const darkRef = useRef<Uint8Array | null>(null);
   const intergrowthRef = useRef<Uint8Array | null>(null);
   // Пиксельный конвейер: базовый снимок RGBA кэшируется один раз; композит наложения
@@ -70,6 +71,7 @@ export function Corrector({
   const visRef = useRef(vis); visRef.current = vis;
   const [maskAlpha, setMaskAlpha] = useState(0.5);
   const maskAlphaRef = useRef(maskAlpha); maskAlphaRef.current = maskAlpha;
+  const toolRef = useRef<Tool>("brush"); toolRef.current = state?.tool ?? "brush";
   const [brightness, setBrightness] = useState(1.0);
   const [clahe, setClahe] = useState(false);
   const [darkFrac, setDarkFrac] = useState(45);
@@ -92,6 +94,7 @@ export function Corrector({
       const phasesGray = await pngToArray(maskUrl(jobId, "phases"), w, h);
       const talc = await pngToArray(maskUrl(jobId, "talc"), w, h);
       spRef.current = await loadSuperpixels(mapUrl(jobId, "superpixels"), w, h);
+      spBoundaryRef.current = computeBoundaries(spRef.current, w, h);
       darkRef.current = await pngToArray(mapUrl(jobId, "darkness"), w, h);
       try {
         intergrowthRef.current = await pngToArray(maskUrl(jobId, "intergrowth"), w, h);
@@ -105,15 +108,18 @@ export function Corrector({
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [jobId, w, h]);
 
-  // Полная перерисовка только когда изменились сами маски или видимость слоёв —
-  // не на смену инструмента/размера кисти (те не трогают холст).
+  // Полная перерисовка только когда изменились сами маски, видимость слоёв,
+  // прозрачность, либо когда входим/выходим из режима «Суперпиксель» (тогда
+  // появляется/пропадает жёлтая сетка) — не на смену остальных инструментов
+  // или размера кисти (те не трогают холст).
+  const spMode = state?.tool === "superpixel";
   useEffect(() => {
     if (state && baseRGBA.current && !strokeRef.current) {
       srcRef.current = { pm: state.phaseMap, tc: state.talc };
       requestDraw();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.phaseMap, state?.talc, vis, maskAlpha, sideTab]);
+  }, [state?.phaseMap, state?.talc, vis, maskAlpha, sideTab, spMode]);
 
   // Яркость/CLAHE — приводим базовый снимок один раз в закэшированный буфер;
   // composePixel всегда читает его вместо необработанного baseRGBA.
@@ -175,6 +181,7 @@ export function Corrector({
         r = 0.5 * r + 0.5 * DARK_RGB[0]; g = 0.5 * g + 0.5 * DARK_RGB[1]; bl = 0.5 * bl + 0.5 * DARK_RGB[2];
       }
     }
+    if (toolRef.current === "superpixel" && spBoundaryRef.current?.[i]) { r = 255; g = 255; bl = 0; }
     o[j] = r; o[j + 1] = g; o[j + 2] = bl; o[j + 3] = 255;
   }
   function flush() {
