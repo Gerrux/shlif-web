@@ -5,6 +5,7 @@ import { imageUrl, maskUrl, mapUrl, saveMasks } from "@/lib/api/client";
 import { maskToPngBlob, rawMaskToPngBlob } from "@/lib/mask/encode";
 import { loadSuperpixels, cellIndices } from "@/lib/mask/superpixel";
 import type { Verdict } from "@/lib/api/types";
+import { IconSave, IconUndo, IconRedo } from "@/components/icons";
 
 const PHASE_RGB: Record<number, [number, number, number]> = { 1: [150, 160, 182], 2: [201, 180, 95] };
 const TALC_RGB: [number, number, number] = [79, 143, 240];
@@ -116,23 +117,51 @@ export function Corrector({ jobId, size, onVerdict }: { jobId: string; size: [nu
     } finally { setSaving(false); }
   }
 
-  if (!state) return <div className="stage" style={{ padding: 40 }}>Загрузка редактора…</div>;
+  if (!state) return (
+    <div className="stage"><div className="stage-empty"><div className="hint">Загрузка редактора…</div></div></div>
+  );
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        {TOOLS.map(([t, ru]) => <button key={t} onClick={() => setState({ ...state, tool: t })}
-          style={{ fontWeight: state.tool === t ? 700 : 400 }}>{ru}</button>)}
+      <div className="toolbar">
+        <span className="toolbar-label">Инструмент</span>
+        <div className="seg" role="group" aria-label="Инструмент">
+          {TOOLS.map(([t, ru]) => (
+            <button key={t} type="button" className={state.tool === t ? "active" : ""}
+              aria-pressed={state.tool === t} onClick={() => setState({ ...state, tool: t })}>{ru}</button>
+          ))}
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        {LAYERS.map(([l, ru]) => <button key={l} onClick={() => setState({ ...state, layer: l })}
-          style={{ fontWeight: state.layer === l ? 700 : 400 }}>{ru}</button>)}
-        <label>кисть <input type="range" min={2} max={40} value={state.brush} onChange={(e) => setState({ ...state, brush: +e.target.value })} /></label>
-        {state.tool === "threshold" && <label>порог <input type="range" min={5} max={200} value={thr} onChange={(e) => setThr(+e.target.value)} /></label>}
-        <button onClick={() => setState(undo(state))}>↶</button>
-        <button onClick={() => setState(redo(state))}>↷</button>
+      <div className="toolbar">
+        <span className="toolbar-label">Слой</span>
+        <div className="seg" role="group" aria-label="Слой маски">
+          {LAYERS.map(([l, ru]) => (
+            <button key={l} type="button" className={state.layer === l ? "active" : ""}
+              aria-pressed={state.layer === l} onClick={() => setState({ ...state, layer: l })}>{ru}</button>
+          ))}
+        </div>
+        <label className="ctl">кисть
+          <input className="slider" type="range" min={2} max={40} value={state.brush}
+            onChange={(e) => setState({ ...state, brush: +e.target.value })} />
+          <span className="slider-val">{state.brush}px</span>
+        </label>
+        {state.tool === "threshold" && (
+          <label className="ctl">порог
+            <input className="slider" type="range" min={5} max={200} value={thr}
+              onChange={(e) => setThr(+e.target.value)} />
+            <span className="slider-val">{thr}</span>
+          </label>
+        )}
+        <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+          <button type="button" className="btn ghost sm icon" title="Отменить" aria-label="Отменить"
+            onClick={() => setState(undo(state))}><IconUndo /></button>
+          <button type="button" className="btn ghost sm icon" title="Повторить" aria-label="Повторить"
+            onClick={() => setState(redo(state))}><IconRedo /></button>
+        </div>
       </div>
       <div className="stage"><canvas ref={canvasRef} width={w} height={h} onClick={onClick} style={{ width: "100%", cursor: "crosshair" }} /></div>
-      <button onClick={save} disabled={saving} style={{ marginTop: 8 }}>{saving ? "Сохранение…" : "💾 Сохранить и пересчитать вердикт"}</button>
+      <button className="btn primary" onClick={save} disabled={saving} style={{ marginTop: 10 }}>
+        <IconSave /> {saving ? "Сохранение…" : "Сохранить и пересчитать вердикт"}
+      </button>
     </div>
   );
 }

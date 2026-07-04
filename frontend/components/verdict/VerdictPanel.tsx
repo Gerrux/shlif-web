@@ -6,9 +6,10 @@ export function VerdictPanel({ result }: { result: AnalyzeResult }) {
   return (
     <div>
       {result.mode === "panorama" ? (
-        <div className="verdict" style={{ marginBottom: 14 }}>
-          <div className="vh"><div className="eye">Секционный вердикт · НА ПРОВЕРКУ</div>
-            <div style={{ marginTop: 8 }}>
+        <div className="verdict">
+          <div className="vh">
+            <div className="eye">Секционный вердикт · на проверку</div>
+            <div className="cls">
               <span className={`oreclass ${["ordinary", "hard", "talcose"].includes(result.verdict.ore_class) ? result.verdict.ore_class : "review"}`}>
                 {oreRu(result.verdict.ore_class)}
               </span>
