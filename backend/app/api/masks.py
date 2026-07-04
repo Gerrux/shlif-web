@@ -11,7 +11,7 @@ router = APIRouter()
 @router.get("/masks/{jid}/{layer}.png")
 def get_mask(jid: str, layer: str):
     p = paths.masks_dir(jid) / f"{layer}.png"
-    if layer not in {"phases", "talc"} or not p.exists():
+    if layer not in {"phases", "talc", "intergrowth"} or not p.exists():
         raise HTTPException(404, "mask not found")
     return FileResponse(p, media_type="image/png")
 

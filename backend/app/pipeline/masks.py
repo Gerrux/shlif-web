@@ -72,14 +72,15 @@ def fit_max_side(arr: np.ndarray, max_side: int, interpolation: int) -> np.ndarr
 
 
 def persist_editor_artifacts(jid: str, r: dict) -> None:
-    """Write the phase/talc masks + superpixel/darkness/confidence maps a
-    finished job needs for the Corrector editor. Shared by the closeup and
-    panorama result assembly so both produce identically-shaped, equally
+    """Write the phase/talc/intergrowth masks + superpixel/darkness/confidence
+    maps a finished job needs for the Corrector editor. Shared by the closeup
+    and panorama result assembly so both produce identically-shaped, equally
     editable artifacts."""
     md = paths.masks_dir(jid)
     mp = paths.maps_dir(jid)
     (md / "phases.png").write_bytes(encode_png_gray(r["phase_map"]))
     (md / "talc.png").write_bytes(encode_png_gray((r["talc"].astype(np.uint8) * 255)))
+    (md / "intergrowth.png").write_bytes(encode_png_gray(r["intergrowth"]))
     (mp / "superpixels.png").write_bytes(encode_png_label_rgb(r["superpixels"]))
     (mp / "darkness.png").write_bytes(encode_png_gray(r["darkness"]))
     (mp / "confidence.png").write_bytes(

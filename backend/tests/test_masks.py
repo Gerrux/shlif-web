@@ -85,6 +85,7 @@ def test_persist_editor_artifacts_writes_all_files(tmp_path, monkeypatch):
     r = {
         "phase_map": np.zeros((8, 8), np.uint8),
         "talc": np.zeros((8, 8), bool),
+        "intergrowth": np.zeros((8, 8), np.uint8),
         "superpixels": np.zeros((8, 8), np.uint16),
         "darkness": np.zeros((8, 8), np.uint8),
         "confidence": np.ones((8, 8), np.float32),
@@ -92,6 +93,7 @@ def test_persist_editor_artifacts_writes_all_files(tmp_path, monkeypatch):
     masks.persist_editor_artifacts("jobx", r)
     assert (tmp_path / "masks" / "jobx" / "phases.png").exists()
     assert (tmp_path / "masks" / "jobx" / "talc.png").exists()
+    assert (tmp_path / "masks" / "jobx" / "intergrowth.png").exists()
     assert (tmp_path / "maps" / "jobx" / "superpixels.png").exists()
     assert (tmp_path / "maps" / "jobx" / "darkness.png").exists()
     assert (tmp_path / "maps" / "jobx" / "confidence.png").exists()
