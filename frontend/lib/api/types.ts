@@ -13,7 +13,7 @@ export interface SortCard { classes: Record<string, number>; top: string; }
 export interface LowConfZone { area: number; phase_a: string; phase_b: string; bbox: number[]; }
 export interface AnalyzeResult {
   mode: Mode; verdict: Verdict; sort: SortCard | null; text?: string;
-  size?: [number, number]; overlay_url?: string; n_ore?: number; n_tiles?: number;
+  size?: [number, number]; n_ore?: number; n_tiles?: number;
   low_conf_zones?: LowConfZone[];
 }
 export interface Job {

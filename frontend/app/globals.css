@@ -93,10 +93,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .topbar .crumb { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .topbar h1 { margin: 3px 0 0; font-size: 21px; font-weight: 700; letter-spacing: -0.02em; }
 .logo {
-  width: 38px; height: 38px; border-radius: 9px; flex-shrink: 0;
-  background: linear-gradient(155deg, oklch(72% 0.13 72), oklch(50% 0.12 55));
-  display: grid; place-items: center; color: oklch(24% 0.05 55);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.32), 0 4px 12px oklch(50% 0.12 55 / 0.28);
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  font-size: 32px; line-height: 1;
 }
 
 /* ---- Переключатель темы ---- */
@@ -248,9 +247,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .welcome-title .wm { color: oklch(98% 0.006 250); }
 .welcome-title .rocket { filter: drop-shadow(0 4px 14px oklch(60% 0.16 60 / .5)); }
 .welcome-tagline { margin: 16px 0 0; font-size: clamp(16px, 2.3vw, 22px); font-weight: 500; color: oklch(87% 0.02 250); letter-spacing: -0.01em; }
-.welcome-desc { margin: 18px auto 32px; max-width: 640px; font-size: 15px; line-height: 1.62; color: oklch(74% 0.015 250); text-align: left; }
-.welcome-desc p { margin: 0 0 14px; }
-.welcome-desc p:last-child { margin-bottom: 0; }
+.welcome-desc { margin: 18px auto 32px; max-width: 620px; font-size: 15px; line-height: 1.62; color: oklch(74% 0.015 250); }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: center; }
 .welcome-cta .arrow { transition: transform .3s; }
 .welcome-cta:hover .arrow { transform: translateX(3px); }
