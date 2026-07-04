@@ -4,7 +4,7 @@ from typing import Callable
 from app.jobs.store import JobStore
 
 class JobRunner:
-    def __init__(self, store: JobStore, max_workers: int = 2):
+    def __init__(self, store: JobStore, max_workers: int = 1):
         self._store = store
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
 

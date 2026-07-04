@@ -26,9 +26,9 @@ async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
 
     def work():
         cfg = loader.get_config()
-        im = Image.open(io.BytesIO(data)).convert("RGB")
         if mode == "panorama":
             return panorama.analyze_panorama(str(up), cfg, jid)
+        im = Image.open(io.BytesIO(data)).convert("RGB")
         im.thumbnail((2400, 2400))
         rgb = np.asarray(im)
         r = closeup.analyze_closeup(rgb, cfg)

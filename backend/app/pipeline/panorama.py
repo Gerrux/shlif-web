@@ -9,6 +9,7 @@ installed.
 
 from __future__ import annotations
 
+import copy
 import time
 
 import cv2
@@ -103,6 +104,7 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
 
 def analyze_panorama(path: str, cfg, jid: str) -> dict:
     """Public wrapper called by the API for `mode=="panorama"`."""
+    cfg = copy.deepcopy(cfg)  # don't mutate the shared @lru_cache'd Config
     cfg.tiling.tile = 2048
     cfg.talc.detect_dark_frac = 0.15
     bundle = loader.load_classifier()
