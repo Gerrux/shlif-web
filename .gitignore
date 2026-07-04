@@ -1,0 +1,36 @@
+# --- models & data (large binaries / runtime state, never committed) ---
+backend/models/
+backend/data/
+*.pt
+*.pkl
+*.onnx
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# --- node / next ---
+node_modules/
+frontend/.next/
+frontend/dist-tests/
+frontend/out/
+.pnpm-store/
+*.tsbuildinfo
+
+# --- env & secrets ---
+.env
+.env.*
+!.env.example
+
+# --- traefik / docker runtime ---
+traefik/logs/
+traefik/acme.json
+
+# --- os / editor ---
+.DS_Store
+.idea/
+.vscode/
