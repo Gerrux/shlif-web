@@ -20,13 +20,15 @@ async def analyze(image: UploadFile = File(...)):
     up = paths.uploads_dir() / f"{jid}_{Path(image.filename or 'up').name}"
     up.write_bytes(data)
 
-    def work():
+    def work(report):
         if mode == "panorama":
-            return panorama.analyze_panorama(str(up), cfg, jid)
+            return panorama.analyze_panorama(str(up), cfg, jid, on_progress=report)
+        report(0.05, "загрузка изображения")
         im = Image.open(io.BytesIO(data)).convert("RGB")
         im.thumbnail((masks.EDIT_MAX_SIDE, masks.EDIT_MAX_SIDE))
         rgb = np.asarray(im)
-        r = closeup.analyze_closeup(rgb, cfg)
+        r = closeup.analyze_closeup(rgb, cfg, on_progress=report)
+        report(0.95, "сохранение результатов")
         disp = paths.images_dir() / f"{jid}.jpg"
         Image.fromarray(rgb).save(disp, "JPEG", quality=90)
         masks.persist_editor_artifacts(jid, r)
