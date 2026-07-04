@@ -19,7 +19,6 @@ const TALC_RGB: [number, number, number] = [79, 143, 240];
 const TOOLS: [Tool, string][] = [
   ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["threshold", "Тёмные области"], ["pan", "Рука"],
 ];
-// Слои: цвет-образец совпадает с наложением на холсте. matrix — база без наложения (нет «глаза»).
 type LayerDef = { key: Layer; ru: string; sw: string; overlay: "sulfide" | "magnetite" | "talc" | null };
 const LAYERS: LayerDef[] = [
   { key: "sulfide", ru: "сульфид", sw: "rgb(201,180,95)", overlay: "sulfide" },
@@ -46,55 +45,81 @@ export function Corrector({
 }) {
   const [w, h] = size;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const baseRef = useRef<ImageBitmap | null>(null);
+  const cursorRef = useRef<HTMLDivElement>(null);
   const spRef = useRef<Uint16Array | null>(null);
   const darkRef = useRef<Uint8Array | null>(null);
+  // Пиксельный конвейер: базовый снимок RGBA кэшируется один раз; композит наложения
+  // считается инкрементально (только изменённые пиксели) и блитится раз в кадр (rAF).
+  const baseRGBA = useRef<Uint8ClampedArray | null>(null);
+  const outRef = useRef<ImageData | null>(null);
+  const srcRef = useRef<{ pm: Uint8Array; tc: Uint8Array } | null>(null);
   const strokeRef = useRef<{ pre: Snapshot; pm: Uint8Array; tc: Uint8Array; lx: number; ly: number } | null>(null);
+  const rafRef = useRef(0);
+  const pendingFull = useRef(false);
+  const pendingIdx = useRef<number[]>([]);
   const [state, setState] = useState<CorrectorState | null>(null);
   const [thr, setThr] = useState(60);
   const [saving, setSaving] = useState(false);
   const [vis, setVis] = useState<Vis>({ sulfide: true, magnetite: true, talc: true });
-  const [cursor, setCursor] = useState<{ x: number; y: number; d: number; on: boolean }>({ x: 0, y: 0, d: 0, on: false });
+  const visRef = useRef(vis); visRef.current = vis;
   const [grabbing, setGrabbing] = useState(false);
   const zp = useZoomPan();
 
   useEffect(() => {
     (async () => {
-      baseRef.current = await createImageBitmap(await (await fetch(imageUrl(jobId))).blob());
+      const bmp = await createImageBitmap(await (await fetch(imageUrl(jobId))).blob());
+      const off = document.createElement("canvas"); off.width = w; off.height = h;
+      const octx = off.getContext("2d")!; octx.drawImage(bmp, 0, 0, w, h);
+      baseRGBA.current = octx.getImageData(0, 0, w, h).data;
+      outRef.current = new ImageData(new Uint8ClampedArray(baseRGBA.current), w, h);
       const phasesGray = await pngToArray(maskUrl(jobId, "phases"), w, h);
       const talc = await pngToArray(maskUrl(jobId, "talc"), w, h);
       spRef.current = await loadSuperpixels(mapUrl(jobId, "superpixels"), w, h);
       darkRef.current = await pngToArray(mapUrl(jobId, "darkness"), w, h);
-      setState(initState(Uint8Array.from(phasesGray), Uint8Array.from(talc.map((v) => (v > 127 ? 1 : 0))), w, h));
+      const st = initState(Uint8Array.from(phasesGray), Uint8Array.from(talc.map((v) => (v > 127 ? 1 : 0))), w, h);
+      srcRef.current = { pm: st.phaseMap, tc: st.talc };
+      setState(st);
     })();
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [jobId, w, h]);
 
-  // Перерисовка из зафиксированного состояния. Во время активного мазка пропускаем —
-  // холст в этот момент рисуется вручную из рабочих массивов мазка (strokeRef).
-  useEffect(() => { if (state && !strokeRef.current) draw(state.phaseMap, state.talc); });
-
-  function draw(pm: Uint8Array, tc: Uint8Array) {
-    const cv = canvasRef.current;
-    if (!cv || !baseRef.current) return;
-    const ctx = cv.getContext("2d")!;
-    ctx.drawImage(baseRef.current, 0, 0, w, h);
-    const od = ctx.getImageData(0, 0, w, h); const d = od.data;
-    for (let i = 0; i < w * h; i++) {
-      const cls = pm[i];
-      const showPhase = (cls === 2 && vis.sulfide) || (cls === 1 && vis.magnetite);
-      if (showPhase) {
-        const rgb = PHASE_RGB[cls];
-        d[i * 4] = 0.45 * d[i * 4] + 0.55 * rgb[0];
-        d[i * 4 + 1] = 0.45 * d[i * 4 + 1] + 0.55 * rgb[1];
-        d[i * 4 + 2] = 0.45 * d[i * 4 + 2] + 0.55 * rgb[2];
-      }
-      if (tc[i] && vis.talc) {
-        d[i * 4] = 0.4 * d[i * 4] + 0.6 * TALC_RGB[0];
-        d[i * 4 + 1] = 0.4 * d[i * 4 + 1] + 0.6 * TALC_RGB[1];
-        d[i * 4 + 2] = 0.4 * d[i * 4 + 2] + 0.6 * TALC_RGB[2];
-      }
+  // Полная перерисовка только когда изменились сами маски или видимость слоёв —
+  // не на смену инструмента/размера кисти (те не трогают холст).
+  useEffect(() => {
+    if (state && baseRGBA.current && !strokeRef.current) {
+      srcRef.current = { pm: state.phaseMap, tc: state.talc };
+      requestDraw();
     }
-    ctx.putImageData(od, 0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.phaseMap, state?.talc, vis]);
+
+  function composePixel(pm: Uint8Array, tc: Uint8Array, i: number) {
+    const b = baseRGBA.current!, o = outRef.current!.data; const j = i * 4;
+    let r = b[j], g = b[j + 1], bl = b[j + 2];
+    const cls = pm[i], v = visRef.current;
+    if ((cls === 2 && v.sulfide) || (cls === 1 && v.magnetite)) {
+      const c = PHASE_RGB[cls];
+      r = 0.45 * r + 0.55 * c[0]; g = 0.45 * g + 0.55 * c[1]; bl = 0.45 * bl + 0.55 * c[2];
+    }
+    if (tc[i] && v.talc) {
+      r = 0.4 * r + 0.6 * TALC_RGB[0]; g = 0.4 * g + 0.6 * TALC_RGB[1]; bl = 0.4 * bl + 0.6 * TALC_RGB[2];
+    }
+    o[j] = r; o[j + 1] = g; o[j + 2] = bl; o[j + 3] = 255;
+  }
+  function flush() {
+    rafRef.current = 0;
+    const src = srcRef.current, out = outRef.current, cv = canvasRef.current;
+    if (src && out && cv) {
+      if (pendingFull.current) for (let i = 0; i < w * h; i++) composePixel(src.pm, src.tc, i);
+      else { const ids = pendingIdx.current; for (let k = 0; k < ids.length; k++) composePixel(src.pm, src.tc, ids[k]); }
+      cv.getContext("2d")!.putImageData(out, 0, 0);
+    }
+    pendingFull.current = false; pendingIdx.current = [];
+  }
+  function requestDraw(idxs?: number[]) {
+    if (idxs) { if (!pendingFull.current) for (let k = 0; k < idxs.length; k++) pendingIdx.current.push(idxs[k]); }
+    else pendingFull.current = true;
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(flush);
   }
 
   function toCanvas(e: React.PointerEvent) {
@@ -120,7 +145,19 @@ export function Corrector({
     else { const cls = s.tool === "eraser" ? 0 : layerToClass(s.layer); for (const i of idxs) pm[i] = cls; }
   }
 
+  function moveCursor(e: React.PointerEvent) {
+    const cd = cursorRef.current, vp = zp.vpRef.current, cv = canvasRef.current;
+    if (!cd) return;
+    if (!vp || !cv || !state || (state.tool !== "brush" && state.tool !== "eraser")) { cd.style.display = "none"; return; }
+    const vr = vp.getBoundingClientRect(), cr = cv.getBoundingClientRect();
+    const d = state.brush * 2 * (cr.width / w);
+    cd.style.display = "block";
+    cd.style.left = `${e.clientX - vr.left}px`; cd.style.top = `${e.clientY - vr.top}px`;
+    cd.style.width = `${d}px`; cd.style.height = `${d}px`;
+  }
+
   function onPointerDown(e: React.PointerEvent) {
+    if ((e.target as Element).closest(".zoom-controls")) return; // клики по кнопкам зума не рисуют
     (e.target as Element).setPointerCapture?.(e.pointerId);
     if (!state) return;
     if (e.button === 1 || state.tool === "pan") { setGrabbing(true); zp.startPan(e); return; }
@@ -128,9 +165,10 @@ export function Corrector({
     if (state.tool === "brush" || state.tool === "eraser") {
       const pre = snapshot(state);
       const pm = Uint8Array.from(state.phaseMap), tc = Uint8Array.from(state.talc);
-      const idxs: number[] = []; stamp(cx, cy, state.brush, idxs); applyStamp(pm, tc, idxs, state);
       strokeRef.current = { pre, pm, tc, lx: cx, ly: cy };
-      draw(pm, tc);
+      srcRef.current = { pm, tc };
+      const idxs: number[] = []; stamp(cx, cy, state.brush, idxs); applyStamp(pm, tc, idxs, state);
+      requestDraw(idxs);
     } else if (state.tool === "superpixel" && spRef.current) {
       const idxs = cellIndices(spRef.current, cy * w + cx);
       setState(state.layer === "talc" ? applyTalc(state, idxs, true) : applyPhase(state, idxs, state.layer));
@@ -142,14 +180,14 @@ export function Corrector({
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    updateCursor(e);
-    if (strokeRef.current && state && (state.tool === "brush" || state.tool === "eraser")) {
+    moveCursor(e);
+    const st = strokeRef.current;
+    if (st && state && (state.tool === "brush" || state.tool === "eraser")) {
       const { cx, cy } = toCanvas(e);
-      const st = strokeRef.current;
       const idxs: number[] = []; strokeLine(st.lx, st.ly, cx, cy, state.brush, idxs);
       applyStamp(st.pm, st.tc, idxs, state);
       st.lx = cx; st.ly = cy;
-      draw(st.pm, st.tc);
+      requestDraw(idxs);
     } else if (zp.isPanning()) {
       zp.movePan(e);
     }
@@ -162,16 +200,6 @@ export function Corrector({
       setState((s) => (s ? commitStroke(s, pre, pm, tc) : s));
     }
     zp.endPan(); setGrabbing(false);
-  }
-
-  function updateCursor(e: React.PointerEvent) {
-    const vp = zp.vpRef.current, cv = canvasRef.current;
-    if (!vp || !cv || !state || (state.tool !== "brush" && state.tool !== "eraser")) {
-      setCursor((c) => (c.on ? { ...c, on: false } : c));
-      return;
-    }
-    const vr = vp.getBoundingClientRect(), cr = cv.getBoundingClientRect();
-    setCursor({ x: e.clientX - vr.left, y: e.clientY - vr.top, d: state.brush * 2 * (cr.width / w), on: true });
   }
 
   async function save() {
@@ -237,7 +265,7 @@ export function Corrector({
                           <span className="nm">{l.ru}</span>
                           {l.overlay ? (
                             <button type="button" className="eye" aria-label={off ? "Показать слой" : "Скрыть слой"}
-                              onClick={(e) => { e.stopPropagation(); setVis((v) => ({ ...v, [l.overlay!]: !v[l.overlay!] })); }}>
+                              onClick={(e) => { e.stopPropagation(); setVis((vv) => ({ ...vv, [l.overlay!]: !vv[l.overlay!] })); }}>
                               {off ? <IconEyeOff className="ico-sm" /> : <IconEye className="ico-sm" />}
                             </button>
                           ) : null}
@@ -246,7 +274,7 @@ export function Corrector({
                     })}
                   </div>
                 </div>
-                <div className="tool-group" style={{ display: "flex", gap: 8, gridTemplateColumns: "unset" }}>
+                <div className="tool-group" style={{ display: "flex", gap: 8 }}>
                   <button type="button" className="btn ghost sm icon" title="Отменить" aria-label="Отменить"
                     onClick={() => setState(undo(state))}><IconUndo /></button>
                   <button type="button" className="btn ghost sm icon" title="Повторить" aria-label="Повторить"
@@ -264,15 +292,15 @@ export function Corrector({
       <div className="ws-view">
         <div ref={zp.vpRef} className={`zoom-vp ${vpClass}`}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endStroke}
-          onPointerLeave={() => { setCursor((c) => ({ ...c, on: false })); }}>
+          onPointerLeave={() => { if (cursorRef.current) cursorRef.current.style.display = "none"; }}>
           <div className="zoom-content" style={{ transform: zp.transform }}>
             {state ? <canvas ref={canvasRef} width={w} height={h} /> : null}
           </div>
           {!state ? <div className="stage-empty"><div className="hint">Загрузка редактора…</div></div> : null}
-          {cursor.on ? <div className="brush-cursor" style={{ left: cursor.x, top: cursor.y, width: cursor.d, height: cursor.d }} /> : null}
+          <div ref={cursorRef} className="brush-cursor" style={{ display: "none" }} />
           <div className="zoom-hint">колесо — зум · «Рука»/средняя кнопка — сдвиг</div>
           <div className="zoom-level">{Math.round(zp.view.zoom * 100)}%</div>
-          <div className="zoom-controls">
+          <div className="zoom-controls" onPointerDown={(e) => e.stopPropagation()}>
             <button type="button" className="btn dark sm icon" title="Отдалить" onClick={zp.zoomOut}><IconZoomOut /></button>
             <button type="button" className="btn dark sm icon" title="Сбросить" onClick={zp.reset}><IconReset /></button>
             <button type="button" className="btn dark sm icon" title="Приблизить" onClick={zp.zoomIn}><IconZoomIn /></button>

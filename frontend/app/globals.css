@@ -87,7 +87,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .pill-code { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); padding: 1px 7px; border-radius: 5px; }
 
 /* ---- Оболочка приложения ---- */
-.app-main { max-width: 1280px; margin: 0 auto; padding: 22px 24px 64px; }
+.app-main { width: 100%; max-width: none; margin: 0; padding: 14px 20px; min-height: 100dvh; }
 .topbar { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
 .topbar .grow { flex: 1; }
 .topbar .crumb { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
@@ -295,10 +295,11 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .zoom-vp { position: relative; overflow: hidden; background: var(--stage); border: 1px solid var(--stage-line); border-radius: 12px; touch-action: none; user-select: none; }
 .zoom-content { transform-origin: 0 0; will-change: transform; }
 .zoom-content canvas, .zoom-content img { display: block; width: 100%; height: auto; }
+.brush-cursor { pointer-events: none; }
 .zoom-vp.grab { cursor: grab; } .zoom-vp.grabbing { cursor: grabbing; } .zoom-vp.paint { cursor: none; }
 .brush-cursor { position: absolute; border: 2px solid oklch(100% 0 0 / .95); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; mix-blend-mode: difference; z-index: 4; }
 .zoom-controls { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; z-index: 5; }
-.zoom-level { position: absolute; left: 12px; bottom: 12px; z-index: 5; font-family: var(--font-mono); font-size: 11px; color: oklch(82% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 3px 8px; backdrop-filter: blur(6px); }
+.zoom-level { position: absolute; left: 12px; bottom: 12px; z-index: 5; pointer-events: none; font-family: var(--font-mono); font-size: 11px; color: oklch(82% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 3px 8px; backdrop-filter: blur(6px); }
 .zoom-hint { position: absolute; left: 12px; top: 12px; z-index: 5; font-family: var(--font-mono); font-size: 11px; color: oklch(78% 0.01 250); background: oklch(20% 0.012 258 / .72); border: 1px solid var(--stage-line); border-radius: 6px; padding: 4px 9px; backdrop-filter: blur(6px); pointer-events: none; }
 
 /* ---- Сетка экрана ---- */
@@ -306,3 +307,15 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .grid2 { display: grid; grid-template-columns: 1.7fr 1fr; gap: 24px; align-items: start; }
 .side { display: grid; gap: 12px; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+
+/* Полноэкранная рабочая зона на широких экранах — редактор во всю высоту, без прокрутки страницы */
+@media (min-width: 961px) {
+  .app-main { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .app-main .topbar { flex-shrink: 0; margin-bottom: 12px; }
+  .app-main .workspace { flex: 1; min-height: 0; }
+  .ws-side { overflow-y: auto; max-height: 100%; padding-right: 2px; }
+  .ws-view { height: 100%; }
+  .zoom-vp { height: 100%; }
+  .zoom-content { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .zoom-content canvas, .zoom-content img { width: auto; height: auto; max-width: 100%; max-height: 100%; }
+}

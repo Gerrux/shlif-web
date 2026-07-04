@@ -104,20 +104,20 @@ def talc_fraction(talc: np.ndarray) -> float:
 
 
 def dark_gray_phase(rgb: np.ndarray, cfg) -> tuple[np.ndarray, float]:
-    """Robust area proxy for the dispersed medium-dark (talc-like) phase.
+    """Area proxy for the medium-dark (talc-like) phase, as a share of the whole image.
 
     Not a segmentation — a graceful fallback for the talc SHARE where the darkness
     segmenter over/under-fires. Selects pixels that are:
       * grey — low HSV saturation and low Lab chroma (not coloured, not annotation);
       * medium-dark — in the lower-middle of the dynamic range, i.e. above the black
         bottom (``dg_black_pct``) and below ``dg_dark_span`` of the way up to the
-        bright-sulfide reference (``dg_bright_pct``);
-      * dispersed — any single connected component larger than ``dg_cap_frac`` of
-        the image is dropped, since a big solid region is matrix/hole, not talc.
+        bright-sulfide reference (``dg_bright_pct``).
+    A genuine talc-rich sample is often one large contiguous mass, not scattered
+    specks, so the whole matching area counts — a component-size cutoff would
+    zero out exactly the samples where the share matters most.
     Returns ``(mask, area_fraction)``. Thresholds fall back to sane defaults so the
     vendored/origin config stays valid.
     """
-    h, w = rgb.shape[:2]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
@@ -131,21 +131,11 @@ def dark_gray_phase(rgb: np.ndarray, cfg) -> tuple[np.ndarray, float]:
     span = float(getattr(cfg, "dg_dark_span", 0.55))
     sat_max = float(getattr(cfg, "dg_sat_max", 60.0))
     chroma_max = float(getattr(cfg, "dg_chroma_max", 22.0))
-    cap = float(getattr(cfg, "dg_cap_frac", 0.12))
 
     floor = float(np.percentile(gray, black_pct))
     bright_ref = float(np.percentile(gray, bright_pct))
     mid = floor + span * (bright_ref - floor)
 
-    cand = (gray > floor) & (gray <= mid) & (sat <= sat_max) & (chroma <= chroma_max)
-    cand &= ~blue_line_mask(rgb, cfg)
-    if not cand.any():
-        return np.zeros((h, w), bool), 0.0
-
-    n, lbl, stats, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8), 8)
-    cap_px = cap * h * w
-    keep = np.zeros((h, w), bool)
-    for i in range(1, n):
-        if stats[i, cv2.CC_STAT_AREA] <= cap_px:
-            keep |= lbl == i
+    keep = (gray > floor) & (gray <= mid) & (sat <= sat_max) & (chroma <= chroma_max)
+    keep &= ~blue_line_mask(rgb, cfg)
     return keep, float(keep.mean())

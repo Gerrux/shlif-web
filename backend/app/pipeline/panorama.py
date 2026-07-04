@@ -3,10 +3,13 @@ aggregate an ore-area-weighted section verdict, and stitch a display overlay.
 
 Ported from ``hakaton_nornikel/scripts/analyze_panorama.py::run_panorama``. The
 ore/matrix gate routes through the trained U-Net (``ore_unet_mask``, see
-``backend/app/shlif/ore_unet.py``) when the checkpoint and torch are available,
-falling back to the classical segmenter otherwise. Torch is never imported here,
-at module top level or otherwise, so `import app.pipeline.panorama` works
-without torch installed.
+``backend/app/shlif/ore_unet.py``) when its checkpoint and torch are available,
+falling back to the classical segmenter otherwise; talc per tile similarly
+comes from the trained talc U-Net when its weights are loadable, else the
+classical ``detect_talc``. Torch is never imported at this module's top
+level — only lazily, inside the U-Net loaders/mask functions when a U-Net
+path actually runs — so `import app.pipeline.panorama` still works without
+torch installed.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
 from app.shlif.talc import detect_talc
 from app.shlif.ore_unet import ore_unet_mask
+from app.shlif.talc_unet import talc_unet_mask
 from app.shlif.tiling import iter_tiles, tile_blend_weight, tile_grid
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 from app.pipeline import loader
@@ -64,8 +68,10 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     stitch a display overlay. Returns a dict with `overlay` (RGB uint8, no banner)
     plus verdict fields. `cfg.tiling.tile` and `cfg.talc.detect_dark_frac` should
     already be set by the caller. Matrix segmentation uses the trained U-Net when
-    available, falling back to classical segmentation otherwise; talc detection
-    stays classical-only (no GPU U-Net branch)."""
+    available, falling back to classical segmentation otherwise; talc per tile
+    comes from the trained talc U-Net when its weights are loadable, else the
+    classical detect_talc."""
+    unet = loader.load_talc_unet()
     Wt, Ht, factor = tile_grid(path, cfg.tiling)
     disp = load_rgb(path, max_pixels=display_mp)
     dh, dw = disp.shape[:2]
@@ -106,7 +112,11 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
             matrix = ~ore_unet_mask(rgb, ore_model, ore_device)
         else:
             matrix = segment_phases(pre, cfg.segment).labels == 0
-        talc = detect_talc(pre, matrix, cfg.talc)
+        if unet is not None:
+            model, device = unet
+            talc = talc_unet_mask(rgb, model, device, thr=None) & matrix
+        else:
+            talc = detect_talc(pre, matrix, cfg.talc)
         ore_px = int((~matrix).sum())
         ore_frac = ore_px / max(matrix.size, 1)
         talc_px += int(talc.sum()); matrix_px += int(matrix.sum())

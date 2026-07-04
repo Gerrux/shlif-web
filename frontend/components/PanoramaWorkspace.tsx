@@ -22,7 +22,7 @@ export function PanoramaWorkspace({ src, info }: { src: string; info?: ReactNode
           </div>
           <div className="zoom-hint">колесо — зум · перетаскивание — сдвиг</div>
           <div className="zoom-level">{Math.round(zp.view.zoom * 100)}%</div>
-          <div className="zoom-controls">
+          <div className="zoom-controls" onPointerDown={(e) => e.stopPropagation()}>
             <button type="button" className="btn dark sm icon" title="Отдалить" onClick={zp.zoomOut}><IconZoomOut /></button>
             <button type="button" className="btn dark sm icon" title="Сбросить" onClick={zp.reset}><IconReset /></button>
             <button type="button" className="btn dark sm icon" title="Приблизить" onClick={zp.zoomIn}><IconZoomIn /></button>
