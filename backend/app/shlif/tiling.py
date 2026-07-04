@@ -56,15 +56,26 @@ def _is_empty(rgb: np.ndarray, bright_frac: float) -> bool:
     return float((v > thr).mean()) < bright_frac
 
 
-def iter_tiles(path: str | Path, cfg) -> Iterator[Tile]:
+def load_working_array(path: str | Path, cfg) -> np.ndarray:
+    """Decode the image once at the tiling working scale (memory-safe draft
+    decode above ``cfg.max_pixels``). Shared by `iter_tiles` and any caller
+    that also needs the full working-scale canvas (e.g. a display copy), so
+    a gigapixel file is only ever decoded once per job."""
+    return load_rgb(path, max_pixels=int(cfg.max_pixels))
+
+
+def iter_tiles(path: str | Path, cfg, arr: np.ndarray | None = None) -> Iterator[Tile]:
     """Yield overlapping tiles across a (possibly gigapixel) image.
 
     ``cfg`` is the ``tiling`` config block. Empty tiles are yielded with
     ``empty=True`` (and no heavy work done) unless ``skip_empty`` is false.
+    Pass a pre-loaded ``arr`` (from :func:`load_working_array`) to avoid
+    decoding the image twice when the caller also needs the full canvas.
     """
     w, h = image_size(path)
     factor = decode_factor(w, h, int(cfg.max_pixels))
-    arr = load_rgb(path, max_pixels=int(cfg.max_pixels))
+    if arr is None:
+        arr = load_working_array(path, cfg)
     H, W = arr.shape[:2]
 
     tile = int(cfg.tile)
@@ -86,3 +97,30 @@ def tile_grid(path: str | Path, cfg) -> tuple[int, int, int]:
     w, h = image_size(path)
     factor = decode_factor(w, h, int(cfg.max_pixels))
     return w // factor, h // factor, factor
+
+
+def axis_tile_starts(size: int, tile: int, step: int) -> list[int]:
+    """Replicate `iter_tiles`' 1-D loop (`range(0, max(1, size-1), step)`) and
+    its tail-tile skip filter (clipped extent < 8px), returning the actual
+    sequence of tile starts that will be yielded along one axis. Both
+    `iter_tiles` and `axis_core_bounds` derive tile positions from this one
+    function, so "the next tile's start" and "the next tile the iterator
+    actually yields" can never disagree."""
+    starts = []
+    for x in range(0, max(1, size - 1), step):
+        if min(tile, size - x) < 8:
+            continue
+        starts.append(x)
+    return starts
+
+
+def axis_core_bounds(size: int, tile: int, step: int) -> dict[int, int]:
+    """For each tile start along one axis, the non-overlapping core end it
+    contributes when reassembling one continuous canvas: the next tile's
+    start, or `size` for the last tile (no next tile exists to claim the
+    remainder). Consecutive cores are exactly contiguous by construction —
+    this is what makes summing every tile's core cover the canvas once, with
+    no gap and no overlap, regardless of how the stride divides the canvas
+    or how many tail tiles independently reach the true edge."""
+    starts = axis_tile_starts(size, tile, step)
+    return {s: (starts[i + 1] if i + 1 < len(starts) else size) for i, s in enumerate(starts)}

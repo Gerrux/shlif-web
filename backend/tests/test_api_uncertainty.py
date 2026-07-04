@@ -24,7 +24,7 @@ def _poll(c, jid):
 
 def test_closeup_result_has_uncertainty(tiny_rgb):
     c = TestClient(app)
-    up = c.post("/api/analyze", data={"mode": "closeup"},
+    up = c.post("/api/analyze",
                 files={"image": ("t.png", _png_bytes(tiny_rgb), "image/png")})
     jid = up.json()["job_id"]
     done = _poll(c, jid)

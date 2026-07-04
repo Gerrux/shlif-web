@@ -1,4 +1,5 @@
 import io
+import cv2
 import numpy as np
 from PIL import Image
 from app.pipeline import masks
@@ -45,3 +46,38 @@ def test_encode_png_label_rgb_roundtrip_survives_8bit_canvas():
     assert rgb.dtype == np.uint8 and rgb.shape == (2, 4, 3)
     decoded = (rgb[..., 0].astype(np.uint32) << 8) | rgb[..., 1].astype(np.uint32)
     assert (decoded == labels).all()
+
+def test_fit_max_side_no_op_when_within_budget():
+    arr = np.zeros((100, 200, 3), np.uint8)
+    out = masks.fit_max_side(arr, 2400, cv2.INTER_AREA)
+    assert out.shape == arr.shape
+
+def test_fit_max_side_downscales_preserving_aspect():
+    arr = np.zeros((4000, 2000, 3), np.uint8)
+    out = masks.fit_max_side(arr, 2000, cv2.INTER_AREA)
+    assert max(out.shape[:2]) == 2000
+    assert out.shape[0] == 2 * out.shape[1]  # aspect ratio kept (4000:2000 == 2:1)
+
+def test_persist_editor_artifacts_writes_all_files(tmp_path, monkeypatch):
+    from app.core import paths as core_paths
+    monkeypatch.setattr(core_paths.settings, "data_dir", tmp_path)
+    r = {
+        "phase_map": np.zeros((8, 8), np.uint8),
+        "talc": np.zeros((8, 8), bool),
+        "superpixels": np.zeros((8, 8), np.uint16),
+        "darkness": np.zeros((8, 8), np.uint8),
+        "confidence": np.ones((8, 8), np.float32),
+    }
+    masks.persist_editor_artifacts("jobx", r)
+    assert (tmp_path / "masks" / "jobx" / "phases.png").exists()
+    assert (tmp_path / "masks" / "jobx" / "talc.png").exists()
+    assert (tmp_path / "maps" / "jobx" / "superpixels.png").exists()
+    assert (tmp_path / "maps" / "jobx" / "darkness.png").exists()
+    assert (tmp_path / "maps" / "jobx" / "confidence.png").exists()
+
+def test_uncertainty_for_editor_returns_full_res_confidence(tiny_rgb):
+    cfg = loader.get_config()
+    u = masks.uncertainty_for_editor(tiny_rgb, cfg)
+    assert u["confidence"].shape == tiny_rgb.shape[:2]
+    assert 0.0 <= u["undetermined_fraction"] <= 1.0
+    assert isinstance(u["low_conf_zones"], list)

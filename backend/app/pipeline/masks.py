@@ -2,8 +2,10 @@ from __future__ import annotations
 import io, cv2, numpy as np
 from PIL import Image
 from skimage.segmentation import slic
+from app.core import paths
 from app.shlif import phases
 from app.shlif.analyze import verdict_from_masks
+from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 
 def phase_label_map(sulfide: np.ndarray, magnetite: np.ndarray) -> np.ndarray:
     pm = np.zeros(sulfide.shape, np.uint8)          # 0 = matrix
@@ -43,3 +45,50 @@ def encode_png_label_rgb(labels: np.ndarray) -> bytes:
     rgb[..., 0] = (labels.astype(np.uint16) >> 8) & 0xFF
     rgb[..., 1] = labels.astype(np.uint16) & 0xFF
     buf = io.BytesIO(); Image.fromarray(rgb, "RGB").save(buf, "PNG"); return buf.getvalue()
+
+
+EDIT_MAX_SIDE = 2400  # editing/display working resolution: the already-proven
+# close-up budget (previously inlined in api/analyze.py as
+# `im.thumbnail((2400, 2400))`); applied uniformly so panorama editing is
+# exactly as responsive as close-up editing is today.
+
+
+def fit_max_side(arr: np.ndarray, max_side: int, interpolation: int) -> np.ndarray:
+    """Resize `arr` (image or integer label map) so its longer side is
+    `max_side`, preserving aspect ratio. No-op if already within budget."""
+    h, w = arr.shape[:2]
+    if max(h, w) <= max_side:
+        return arr
+    s = max_side / float(max(h, w))
+    return cv2.resize(arr, (max(1, round(w * s)), max(1, round(h * s))), interpolation=interpolation)
+
+
+def persist_editor_artifacts(jid: str, r: dict) -> None:
+    """Write the phase/talc masks + superpixel/darkness/confidence maps a
+    finished job needs for the Corrector editor. Shared by the closeup and
+    panorama result assembly so both produce identically-shaped, equally
+    editable artifacts."""
+    md = paths.masks_dir(jid)
+    mp = paths.maps_dir(jid)
+    (md / "phases.png").write_bytes(encode_png_gray(r["phase_map"]))
+    (md / "talc.png").write_bytes(encode_png_gray((r["talc"].astype(np.uint8) * 255)))
+    (mp / "superpixels.png").write_bytes(encode_png_label_rgb(r["superpixels"]))
+    (mp / "darkness.png").write_bytes(encode_png_gray(r["darkness"]))
+    (mp / "confidence.png").write_bytes(
+        encode_png_gray(np.clip(r["confidence"] * 255.0, 0, 255).astype(np.uint8)))
+
+
+_UNC_MAX_SIDE = 1024  # cap the ensemble-segmentation resolution — the fraction is scale-robust
+
+
+def uncertainty_for_editor(rgb: np.ndarray, cfg) -> dict:
+    """Ensemble-perturbation uncertainty, computed on a downscaled copy for
+    speed and the confidence map resized back to `rgb`'s own frame. Shared by
+    closeup and panorama so both report confidence/low_conf_zones the same way."""
+    h, w = rgb.shape[:2]
+    s = min(1.0, _UNC_MAX_SIDE / max(h, w))
+    small = cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA) if s < 1 else rgb
+    u = ensemble_uncertainty(small, cfg)
+    conf = cv2.resize(u["confidence"], (w, h), interpolation=cv2.INTER_LINEAR)
+    return {"confidence": conf, "undetermined_fraction": u["undetermined_fraction"],
+            "low_conf_zones": find_low_conf_zones(u)}

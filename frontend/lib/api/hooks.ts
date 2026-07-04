@@ -1,9 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { analyze, getJob } from "./client";
-import type { Mode } from "./types";
 
 export function useAnalyze() {
-  return useMutation({ mutationFn: (v: { file: File; mode: Mode }) => analyze(v.file, v.mode) });
+  return useMutation({ mutationFn: (v: { file: File }) => analyze(v.file) });
 }
 export function useJob(id: string | null) {
   return useQuery({

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import numpy as np
+import cv2, numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from app.core import paths
@@ -35,6 +35,14 @@ async def save_masks(jid: str, phases: UploadFile = File(...), talc: UploadFile 
     tk = M.decode_png_gray(await talc.read()) > 127
     paths.masks_dir(jid).joinpath("phases.png").write_bytes(M.encode_png_gray(pm))
     paths.masks_dir(jid).joinpath("talc.png").write_bytes(M.encode_png_gray(tk.astype(np.uint8) * 255))
+
+    job = get_runtime().store.get(jid)
+    native = (job.result or {}).get("native_size") if job else None
+    if native and tuple(native) != (pm.shape[1], pm.shape[0]):
+        nw, nh = int(native[0]), int(native[1])
+        pm = cv2.resize(pm, (nw, nh), interpolation=cv2.INTER_NEAREST)
+        tk = cv2.resize(tk.astype(np.uint8), (nw, nh), interpolation=cv2.INTER_NEAREST) > 0
+
     su, mg, mx = M.split_phase_map(pm)
     cfg = loader.get_config()
     v = M.verdict_from_masks_dict(su, mg, mx, tk & mx, cfg)
