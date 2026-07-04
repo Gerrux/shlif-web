@@ -1,3 +1,4 @@
+import sqlite3
 import time
 from app.jobs.store import JobStore
 from app.jobs.runner import JobRunner
@@ -25,3 +26,19 @@ def test_job_lifecycle_error(tmp_path):
         time.sleep(0.05)
     rec = store.get(jid)
     assert rec.status == "error" and "nope" in rec.message
+
+def test_log_correction_inserts_row(tmp_path):
+    db_path = tmp_path / "t.db"
+    store = JobStore(db_path)
+    jid = store.create("closeup")
+    store.log_correction(jid, "talc", 42)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT job_id, layer, n_pixels FROM corrections WHERE job_id=?", (jid,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (jid, "talc", 42)
