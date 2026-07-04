@@ -30,6 +30,22 @@ _MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 _STD = np.array([0.229, 0.224, 0.225], np.float32)
 
 
+def resolve_threshold(prob: np.ndarray, lo: float = 0.05, hi: float = 0.30,
+                      k95: float = 0.85, k99: float = 0.55) -> float:
+    """Adaptive sigmoid threshold for a talc probability map, clamped to ``[lo, hi]``.
+
+    ``max(p95*k95, p99*k99)`` keeps a weak-but-present talc signal from vanishing
+    under a fixed 0.5 cut (the top percentiles survive) while the clamp stops noise
+    from flooding (floor) or a strong map from over-shrinking (ceiling). Borrowed
+    cascade — use where a non-empty-but-not-flooded mask matters more than a fixed
+    operating point.
+    """
+    p95 = float(np.percentile(prob, 95))
+    p99 = float(np.percentile(prob, 99))
+    thr = max(p95 * k95, p99 * k99)
+    return float(min(max(thr, lo), hi))
+
+
 def build_talc_unet(ckpt: str = TALC_CKPT, device: str | None = None):
     """Load the trained talc U-Net → ``(model, device)``, or ``None`` if unavailable.
 
@@ -52,13 +68,14 @@ def build_talc_unet(ckpt: str = TALC_CKPT, device: str | None = None):
         return None
 
 
-def talc_unet_mask(rgb: np.ndarray, model, device: str, thr: float = 0.5) -> np.ndarray:
+def talc_unet_mask(rgb: np.ndarray, model, device: str, thr: float | None = 0.5) -> np.ndarray:
     """Binary talc mask (bool HxW) from the trained U-Net: ``sigmoid >= thr``.
 
     Mirrors ``annotate_talc.unet_mask``: the whole image is resized to 512,
     ImageNet-normalised, run through the sigmoid head, resized back to native
     resolution and thresholded. No WB/CLAHE — the talc model was trained on raw
-    RGB (unlike the ore U-Net's ``wb_clahe`` path). ``thr`` is a 0..1 fraction.
+    RGB (unlike the ore U-Net's ``wb_clahe`` path). ``thr`` is a 0..1 fraction, or
+    ``None`` to pick it adaptively from the map (:func:`resolve_threshold`).
     """
     import torch
 
@@ -68,4 +85,6 @@ def talc_unet_mask(rgb: np.ndarray, model, device: str, thr: float = 0.5) -> np.
     x = torch.from_numpy(im.transpose(2, 0, 1)[None].astype(np.float32)).to(device)
     with torch.inference_mode():
         pr = torch.sigmoid(model(x))[0, 0].float().cpu().numpy()
-    return cv2.resize(pr, (W, H)) >= float(thr)
+    pr = cv2.resize(pr, (W, H))
+    t = resolve_threshold(pr) if thr is None else float(thr)
+    return pr >= t
