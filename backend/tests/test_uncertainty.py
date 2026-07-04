@@ -4,10 +4,12 @@ Segment the image under a few soft photometric perturbations; where the phase
 label is stable across the ensemble the pixel is confident, where it flips the
 pixel is disputed. Yields a per-pixel confidence map + an undetermined_fraction —
 an honesty/UX signal for the human-in-the-loop (borrowed idea)."""
+import os
 import threading
 import time
 
 import numpy as np
+import pytest
 
 from app.shlif import uncertainty
 from app.pipeline import loader
@@ -45,6 +47,10 @@ def test_ensemble_uncertainty_reports_progress_per_perturbation():
     assert calls == [(i, total) for i in range(1, total + 1)]
 
 
+@pytest.mark.skipif(
+    (os.cpu_count() or 1) <= 1,
+    reason="needs >1 CPU to observe overlap",
+)
 def test_perturbations_run_concurrently(monkeypatch):
     lock = threading.Lock()
     current = [0]
