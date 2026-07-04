@@ -623,11 +623,31 @@ def _synthetic_section():
     img[100:300, 350:550] = 220
     # Mid-grey magnetite blob straddling the y=896 core boundary instead (x
     # safely inside the [896,1344) x-core so only the y-seam is exercised
-    # here) -- same `_is_empty` threshold-blowout risk applies to this blob
-    # too, so it's sized to stay well clear of it (verified empirically
-    # against the real `_is_empty`: both straddled tiles come back
-    # bright_frac ~0.12-0.13, thr ~100, non-empty).
-    img[800:1000, 1000:1200] = 120
+    # here). Value 60, not the naive 120: 120 converts to Lab L high enough
+    # that segment_phases classifies it as sulfide, not magnetite.
+    #
+    # IMPORTANT: segment_phases runs PER TILE inside _assemble_masks (each
+    # tile gets its own independent 3-class Otsu split), not once over the
+    # whole image -- verified directly against the real per-tile path, not
+    # just a whole-image segment_phases() call (an earlier attempt at this
+    # fixture was wrongly validated that way and passed only by accident).
+    # A tile containing just dark background + ONE brighter blob is
+    # effectively bimodal, and 3-class Otsu on a bimodal population reliably
+    # puts the blob in the brightest ("sulfide") band regardless of its
+    # absolute value -- there's no genuine "middle" population for it to
+    # land in. Getting a real magnetite (middle-band) classification requires
+    # a truly trimodal histogram within that same tile: dark matrix + this
+    # mid-grey blob + something distinctly brighter still. The small sulfide
+    # anchor below supplies that third population (placed in the y=[896,960)
+    # overlap band shared by both tiles this blob straddles, so one anchor
+    # serves both). Verified empirically: with the anchor present, 60
+    # classifies as ~100% magnetite in the blob region across both tiles,
+    # and both tiles stay comfortably non-empty under tiling._is_empty
+    # (bright_frac ~0.005-0.007, threshold is 0.002).
+    img[800:1000, 1000:1200] = 60
+    img[890:930, 890:930] = 220  # sulfide anchor -- gives the two tiles the
+    # magnetite blob straddles a real trimodal histogram (see note above);
+    # not itself asserted on, it only exists to make Otsu's split meaningful
     return img
 
 
