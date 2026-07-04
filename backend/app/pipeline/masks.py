@@ -2,6 +2,7 @@ from __future__ import annotations
 import io, cv2, numpy as np
 from PIL import Image
 from skimage.segmentation import slic
+from app.core import paths
 from app.shlif import phases
 from app.shlif.analyze import verdict_from_masks
 
@@ -43,3 +44,34 @@ def encode_png_label_rgb(labels: np.ndarray) -> bytes:
     rgb[..., 0] = (labels.astype(np.uint16) >> 8) & 0xFF
     rgb[..., 1] = labels.astype(np.uint16) & 0xFF
     buf = io.BytesIO(); Image.fromarray(rgb, "RGB").save(buf, "PNG"); return buf.getvalue()
+
+
+EDIT_MAX_SIDE = 2400  # editing/display working resolution: the already-proven
+# close-up budget (previously inlined in api/analyze.py as
+# `im.thumbnail((2400, 2400))`); applied uniformly so panorama editing is
+# exactly as responsive as close-up editing is today.
+
+
+def fit_max_side(arr: np.ndarray, max_side: int, interpolation: int) -> np.ndarray:
+    """Resize `arr` (image or integer label map) so its longer side is
+    `max_side`, preserving aspect ratio. No-op if already within budget."""
+    h, w = arr.shape[:2]
+    if max(h, w) <= max_side:
+        return arr
+    s = max_side / float(max(h, w))
+    return cv2.resize(arr, (max(1, round(w * s)), max(1, round(h * s))), interpolation=interpolation)
+
+
+def persist_editor_artifacts(jid: str, r: dict) -> None:
+    """Write the phase/talc masks + superpixel/darkness/confidence maps a
+    finished job needs for the Corrector editor. Shared by the closeup and
+    panorama result assembly so both produce identically-shaped, equally
+    editable artifacts."""
+    md = paths.masks_dir(jid)
+    mp = paths.maps_dir(jid)
+    (md / "phases.png").write_bytes(encode_png_gray(r["phase_map"]))
+    (md / "talc.png").write_bytes(encode_png_gray((r["talc"].astype(np.uint8) * 255)))
+    (mp / "superpixels.png").write_bytes(encode_png_label_rgb(r["superpixels"]))
+    (mp / "darkness.png").write_bytes(encode_png_gray(r["darkness"]))
+    (mp / "confidence.png").write_bytes(
+        encode_png_gray(np.clip(r["confidence"] * 255.0, 0, 255).astype(np.uint8)))
