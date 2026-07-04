@@ -9,9 +9,11 @@ export function useJob(id: string | null) {
     queryKey: ["job", id],
     queryFn: () => getJob(id as string),
     enabled: !!id,
+    retry: 1,
     refetchInterval: (q) => {
       const s = q.state.data?.status;
-      return s === "done" || s === "error" ? false : 800;
+      if (s === "done" || s === "error") return false;
+      return q.state.status === "error" ? false : 800;
     },
   });
 }
