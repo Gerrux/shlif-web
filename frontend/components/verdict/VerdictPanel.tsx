@@ -5,6 +5,11 @@ import { oreRu } from "@/lib/ore";
 export function VerdictPanel({ result }: { result: AnalyzeResult }) {
   return (
     <div>
+      <div className="ptag-row">
+        <span className="ptag normal"><i className="d" />Обычные срастания</span>
+        <span className="ptag fine"><i className="d" />Тонкие срастания</span>
+        <span className="ptag talc"><i className="d" />Тальк</span>
+      </div>
       {result.mode === "panorama" ? (
         <div className="verdict">
           <div className="vh">
