@@ -96,9 +96,10 @@ def talc_unet_mask(rgb: np.ndarray, model, device: str, thr: float | None = 0.5)
     with torch.inference_mode():
         if use_amp:
             with torch.autocast(device_type="cuda", dtype=torch.float16):
-                pr = torch.sigmoid(model(x))[0, 0]
+                logits = model(x)
         else:
-            pr = torch.sigmoid(model(x))[0, 0]
+            logits = model(x)
+        pr = torch.sigmoid(logits)[0, 0]
         pr = pr.float().cpu().numpy()
     pr = cv2.resize(pr, (W, H))
     t = resolve_threshold(pr) if thr is None else float(thr)
