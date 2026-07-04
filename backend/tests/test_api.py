@@ -21,6 +21,7 @@ def test_closeup_analyze_and_edit(tiny_rgb):
     jid = up.json()["job_id"]
     done = _poll(c, jid)
     assert done["status"] == "done"
+    assert done["progress"] == 1.0
     assert done["result"]["mode"] == "closeup"  # tiny_rgb (256x256) is well under direct_max_pixels
     assert done["result"]["verdict"]["ore_class"] in {"ordinary","hard","talcose","review"}
 

@@ -30,3 +30,13 @@ def test_ambiguous_grey_is_not_more_confident_than_clear():
     u_clear = uncertainty.ensemble_uncertainty(clear, CFG)
     u_amb = uncertainty.ensemble_uncertainty(ambiguous, CFG)
     assert u_amb["undetermined_fraction"] >= u_clear["undetermined_fraction"]
+
+
+def test_ensemble_uncertainty_reports_progress_per_perturbation():
+    rgb = np.full((64, 64, 3), 10, np.uint8)
+    rgb[16:48, 16:48] = 245
+    calls = []
+    uncertainty.ensemble_uncertainty(rgb, CFG, on_step=lambda i, total: calls.append((i, total)))
+
+    total = len(uncertainty._PERTURBATIONS)
+    assert calls == [(i, total) for i in range(1, total + 1)]

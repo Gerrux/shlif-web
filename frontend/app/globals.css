@@ -226,6 +226,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .stage-empty .ico { color: oklch(56% 0.02 258); }
 .stage-empty .hint { font-size: 13.5px; }
 .stage-empty .sub { font-family: var(--font-mono); font-size: 11.5px; color: oklch(56% 0.014 258); }
+.progress-track { width: 100%; max-width: 340px; height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--brand); border-radius: 999px; transition: width .3s ease; }
+.progress-meta { display: flex; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
 
 /* ---- Панель инструментов корректора ---- */
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }

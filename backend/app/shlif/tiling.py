@@ -99,6 +99,21 @@ def tile_grid(path: str | Path, cfg) -> tuple[int, int, int]:
     return w // factor, h // factor, factor
 
 
+def count_tiles(path: str | Path, cfg) -> int:
+    """Exact tile count `iter_tiles` will yield, without decoding any tile pixels —
+    a cheap upfront total for progress reporting. Built on axis_tile_starts (the
+    same 1-D bounds + tail-skip filter iter_tiles itself is built from), so this
+    can never disagree with what iter_tiles actually yields."""
+    w, h = image_size(path)
+    factor = decode_factor(w, h, int(cfg.max_pixels))
+    W, H = w // factor, h // factor
+    tile = int(cfg.tile)
+    step = max(1, tile - int(cfg.overlap))
+    n_x = len(axis_tile_starts(W, tile, step))
+    n_y = len(axis_tile_starts(H, tile, step))
+    return n_x * n_y
+
+
 def axis_tile_starts(size: int, tile: int, step: int) -> list[int]:
     """Replicate `iter_tiles`' 1-D loop (`range(0, max(1, size-1), step)`) and
     its tail-tile skip filter (clipped extent < 8px), returning the actual

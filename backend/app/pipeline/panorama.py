@@ -36,7 +36,7 @@ from app.shlif.segment import segment_phases
 from app.shlif.talc import dark_gray_phase, detect_talc
 from app.shlif.ore_unet import ore_unet_mask
 from app.shlif.talc_unet import talc_unet_mask
-from app.shlif.tiling import axis_core_bounds, iter_tiles, load_working_array, tile_blend_weight, tile_grid
+from app.shlif.tiling import axis_core_bounds, count_tiles, iter_tiles, load_working_array, tile_blend_weight, tile_grid
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 from app.pipeline import loader, masks
 from app.core import paths
@@ -68,12 +68,14 @@ def aggregate_section(records, classes) -> np.ndarray:
     return (P * W[:, None]).sum(0) / W.sum()
 
 
-def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
+def _assemble_masks(path: str, cfg, arr: np.ndarray, on_progress=None) -> dict:
     """Tile the section, segment + talc-detect each tile, and reassemble one
     continuous mask set for the whole working canvas — core-crop (no overlap
     double count, see `axis_core_bounds`) — so `verdict_from_masks` sees the
     same kind of input it gets from a single close-up pass. Classical
-    segmentation only (see module docstring)."""
+    segmentation only (see module docstring). `on_progress(progress, message)`,
+    if given, is called once per tile, scaled into the 0.05-0.35 job-progress
+    range (this is the first of panorama's two tile loops)."""
     H, W = arr.shape[:2]
     sulfide = np.zeros((H, W), bool)
     magnetite = np.zeros((H, W), bool)
@@ -84,8 +86,13 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
     step = max(1, tile_px - int(cfg.tiling.overlap))
     x_core_end = axis_core_bounds(W, tile_px, step)
     y_core_end = axis_core_bounds(H, tile_px, step)
+    total = max(1, count_tiles(path, cfg.tiling))
+    n = 0
 
     for tile in iter_tiles(path, cfg.tiling, arr=arr):
+        n += 1
+        if on_progress:
+            on_progress(0.05 + 0.30 * min(1.0, n / total), f"сборка масок ({n}/{total})")
         # a tile's core always starts at its own (x, y) — only the end can be
         # pulled in earlier than the tile's full extent, per axis_core_bounds
         cx0, cy0 = tile.x, tile.y
@@ -110,7 +117,8 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
     return {"sulfide": sulfide, "magnetite": magnetite, "matrix": matrix, "talc": talc, "dg": dg}
 
 
-def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore: float = 0.04) -> dict:
+def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore: float = 0.04,
+                  on_progress=None) -> dict:
     """Tile a panorama, classify ore-rich tiles for the `sort` card (ore-density
     weighted aggregation — unchanged mechanism, see design spec §4.2), estimate
     per-tile ensemble uncertainty, and stitch the display overlay. Matrix
@@ -119,7 +127,10 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
     similarly prefers the trained talc U-Net over the classical detector. The
     whole-image phase/talc masks and the `ore_class` verdict come from
     `_assemble_masks` + `verdict_from_masks` instead (design spec §4.1) — this
-    function no longer decides ore_class."""
+    function no longer decides ore_class. `on_progress(progress, message)`, if
+    given, is called once per tile, scaled into the 0.35-0.85 job-progress
+    range (this is the second of panorama's two tile loops, and the more
+    expensive one — it runs a 5-perturbation ensemble per tile)."""
     unet = loader.load_talc_unet()
     ore_bundle = loader.load_ore_unet()
     ore_source = "unet" if ore_bundle is not None else "classical"
@@ -146,9 +157,13 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
     n_tiles = n_ore = n_matrix = 0
     t0 = time.time()
     sort_alpha = 0.32
+    total_tiles_est = max(1, count_tiles(path, cfg.tiling))
 
     for tile in iter_tiles(path, cfg.tiling, arr=arr):
         n_tiles += 1
+        if on_progress:
+            on_progress(0.35 + 0.50 * min(1.0, n_tiles / total_tiles_est),
+                        f"сегментация тайлов ({n_tiles}/{total_tiles_est})")
         if tile.empty:
             continue
         rgb = tile.rgb
@@ -227,11 +242,15 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
     }
 
 
-def analyze_panorama(path: str, cfg, jid: str) -> dict:
+def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
     """Public wrapper called by the API. Builds the whole-canvas phase/talc
     masks (design spec §4) and reuses `verdict_from_masks_dict` — the exact
     helper close-up uses — so the result has the same shape and the same
     meaning, computed over the whole image instead of per tile."""
+    def report(p, msg):
+        if on_progress:
+            on_progress(p, msg)
+
     cfg = copy.deepcopy(cfg)  # don't mutate the shared @lru_cache'd Config
     cfg.tiling.tile = 2048
     cfg.talc.detect_dark_frac = 0.15
@@ -240,16 +259,19 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
         raise RuntimeError("classifier.pkl required for panorama sort")
     clf, feat, classes = bundle
 
+    report(0.05, "загрузка изображения")
     arr = load_working_array(path, cfg.tiling)
     H, W = arr.shape[:2]
 
-    assembled = _assemble_masks(path, cfg, arr)
+    assembled = _assemble_masks(path, cfg, arr, on_progress=on_progress)
+    report(0.35, "вердикт по фазам")
     verdict = masks.verdict_from_masks_dict(
         assembled["sulfide"], assembled["magnetite"], assembled["matrix"], assembled["talc"], cfg)
     verdict["metrics"]["talc_share_est"] = float(assembled["dg"].mean())
 
-    run = _run_panorama(path, clf, feat, classes, cfg, arr)
+    run = _run_panorama(path, clf, feat, classes, cfg, arr, on_progress=on_progress)
     verdict["metrics"]["undetermined_fraction"] = run["undetermined_fraction"]
+    report(0.85, "сохранение оверлея")
     Image.fromarray(run["overlay"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
 
     edit = run["edit_rgb"]
@@ -264,8 +286,10 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
     # confidence MAP for the editor overlay only (single downscaled pass);
     # low_conf_zones/undetermined_fraction above use _run_panorama's finer,
     # per-tile aggregation instead of this call's own (coarser) values.
+    report(0.88, "карта уверенности для редактора")
     unc = masks.uncertainty_for_editor(edit, cfg)
 
+    report(0.93, "построение карт")
     masks.persist_editor_artifacts(jid, {
         "phase_map": phase_small, "talc": talc_small,
         "superpixels": masks.build_superpixel_map(edit),
