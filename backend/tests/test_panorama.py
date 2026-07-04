@@ -36,31 +36,58 @@ def test_panorama_does_not_mutate_shared_config(tmp_path):
 
 
 @pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
-def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
-    """When loader.load_talc_unet() has weights, _run_panorama's per-tile talc
-    decision (which drives the display overlay + ore-density weighting) must
-    come from the U-Net, not the classical detect_talc.
+def test_panorama_persists_intergrowth_mask(tmp_path, monkeypatch):
+    from app.core import paths as core_paths
+    from app.pipeline import masks as M
+    monkeypatch.setattr(core_paths.settings, "data_dir", tmp_path)
+    img = (np.random.default_rng(4).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+    img[100:400, 100:400] = 210
+    p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
+    cfg = loader.get_config()
+    r = panorama.analyze_panorama(str(p), cfg, "igtest")
+    assert "intergrowth" not in r["verdict"]  # popped before returning, must never leak to the JSON verdict
+    ig = M.decode_png_gray((core_paths.masks_dir("igtest") / "intergrowth.png").read_bytes())
+    assert ig.shape == (r["size"][1], r["size"][0])
+    assert set(np.unique(ig)) <= {0, 1, 2}
 
-    This checks only that path, not a ban on detect_talc anywhere in
-    analyze_panorama: _assemble_masks (which produces the *reported* verdict)
-    is classical-only regardless of U-Net availability (see this module's
-    docstring — wiring U-Net into _assemble_masks too, mirroring
-    shlif.analyze.analyze_image's ore_mask pattern, is a reasonable follow-up
-    but is new, unreviewed work, not something to fold into this merge) — so
-    it legitimately still calls detect_talc, and a blanket ban would fail for
-    a reason unrelated to what this test is actually checking."""
-    img = (np.random.default_rng(3).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+
+@pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
+def test_run_panorama_no_longer_builds_a_tile_painted_overlay(tmp_path):
+    """SORT_RGB tile-painting was the source of the tile-based look users saw —
+    removed per report-classification-overlay design §4.3. _run_panorama must
+    no longer return an "overlay" key; edit_rgb is the plain stitched photo."""
+    from app.shlif.tiling import load_working_array
+    img = (np.random.default_rng(5).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+    img[100:400, 100:400] = 210
+    p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
+    cfg = loader.get_config()
+    clf, feat, classes = loader.load_classifier()
+    arr = load_working_array(str(p), cfg.tiling)
+    run = panorama._run_panorama(str(p), clf, feat, classes, cfg, arr)
+    assert "overlay" not in run
+    assert "edit_rgb" in run
+
+
+def test_panorama_module_no_longer_defines_sort_rgb():
+    """Unconditional guard (no classifier.pkl needed) against SORT_RGB tile-painting
+    reappearing — the classifier-gated test above covers the runtime behavior, this
+    covers the module surface even when no model is available to run that test."""
+    assert not hasattr(panorama, "SORT_RGB")
+
+
+@pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
+def test_panorama_survives_tile_pyramid_failure(tmp_path, monkeypatch):
+    """A broken tile pyramid must never take down the whole analysis — it's
+    a display enhancement, not part of the verdict."""
+    img = (np.random.default_rng(4).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
     img[100:400, 100:400] = 210
     p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
     cfg = loader.get_config()
 
-    calls = []
-    def fake_talc_unet(rgb, model, device, thr=None):
-        calls.append(1)
-        return np.ones(rgb.shape[:2], bool)
-    monkeypatch.setattr(panorama.loader, "load_talc_unet", lambda: ("fake-model", "cpu"))
-    monkeypatch.setattr(panorama, "talc_unet_mask", fake_talc_unet)
+    def boom(arr, jid):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(panorama.tiles, "build_pyramid", boom)
 
-    r = panorama.analyze_panorama(str(p), cfg, "unettest")
+    r = panorama.analyze_panorama(str(p), cfg, "pyramidfailtest")
     assert r["mode"] == "panorama"
-    assert len(calls) > 0  # the U-Net talc path was actually exercised, not skipped
+    assert r["verdict"]["ore_class"] in {"ordinary", "hard", "talcose", "review"}

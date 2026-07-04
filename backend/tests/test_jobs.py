@@ -8,7 +8,7 @@ def test_job_lifecycle_success(tmp_path):
     runner = JobRunner(store)
     jid = store.create("closeup")
     assert store.get(jid).status == "queued"
-    runner.submit(jid, lambda: {"ore_class": "ordinary"})
+    runner.submit(jid, lambda report: {"ore_class": "ordinary"})
     for _ in range(50):
         if store.get(jid).status == "done": break
         time.sleep(0.05)
@@ -19,13 +19,32 @@ def test_job_lifecycle_error(tmp_path):
     store = JobStore(tmp_path / "t.db")
     runner = JobRunner(store)
     jid = store.create("closeup")
-    def boom(): raise ValueError("nope")
+    def boom(report): raise ValueError("nope")
     runner.submit(jid, boom)
     for _ in range(50):
         if store.get(jid).status == "error": break
         time.sleep(0.05)
     rec = store.get(jid)
     assert rec.status == "error" and "nope" in rec.message
+
+def test_job_reports_intermediate_progress_before_done(tmp_path):
+    store = JobStore(tmp_path / "t.db")
+    runner = JobRunner(store)
+    jid = store.create("closeup")
+
+    def fn(report):
+        report(0.5, "halfway")
+        rec = store.get(jid)
+        assert rec.status == "running"
+        assert rec.progress == 0.5
+        assert rec.message == "halfway"
+        return {"ore_class": "ordinary"}
+
+    runner.submit(jid, fn)
+    for _ in range(50):
+        if store.get(jid).status == "done": break
+        time.sleep(0.05)
+    assert store.get(jid).status == "done"
 
 def test_log_correction_inserts_row(tmp_path):
     db_path = tmp_path / "t.db"

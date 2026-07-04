@@ -35,8 +35,9 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
         </h1>
         <p className="welcome-tagline">Скажи мне, кто твой шлиф</p>
         <p className="welcome-desc">
-          Автоматическая классификация руд по панорамным OM-изображениям полированных шлифов:
-          сегментация сульфидных фаз, детекция талька и вердикт по экспертной логике.
+          Определяет сорт руды по снимку шлифа — рядовая, труднообогатимая или оталькованная — за секунды
+          вместо часов ручной работы геолога. Нейросеть отделяет руду от породы и оценивает сорт по размеру
+          зёрен сульфидов, а спорные зоны и итоговую маску можно проверить и поправить прямо в интерфейсе.
         </p>
         <label
           className={`dropzone${drag ? " drag" : ""}`}
@@ -53,11 +54,13 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
       </div>
       <div className="welcome-credits">
         <span className="wc-label">Команда</span>
-        {TEAM.map((m) => (
-          <a key={m.url} className="wc-link" href={m.url} target="_blank" rel="noopener noreferrer">
-            <IconTelegram className="ico-sm" />{m.name}
-          </a>
-        ))}
+        <div className="wc-links">
+          {TEAM.map((m) => (
+            <a key={m.url} className="wc-link" href={m.url} target="_blank" rel="noopener noreferrer">
+              <IconTelegram className="ico-sm" />{m.name}
+            </a>
+          ))}
+        </div>
       </div>
     </section>
   );

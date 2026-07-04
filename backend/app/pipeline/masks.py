@@ -16,9 +16,17 @@ def phase_label_map(sulfide: np.ndarray, magnetite: np.ndarray) -> np.ndarray:
 def split_phase_map(pm: np.ndarray):
     return pm == phases.SULFIDE, pm == phases.MAGNETITE, pm == phases.MATRIX
 
+def intergrowth_label_map(normal: np.ndarray, fine: np.ndarray) -> np.ndarray:
+    """0 = not sulfide (magnetite/matrix/talc), 1 = normal (обычные), 2 = fine (тонкие)."""
+    im = np.zeros(normal.shape, np.uint8)
+    im[np.asarray(fine, dtype=bool)] = 2
+    im[np.asarray(normal, dtype=bool)] = 1
+    return im
+
 def verdict_from_masks_dict(sulfide, magnetite, matrix, talc, cfg) -> dict:
     v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg)
-    return {"ore_class": v["ore_class"], "text": v["text"], "metrics": v["metrics"]}
+    return {"ore_class": v["ore_class"], "text": v["text"], "metrics": v["metrics"],
+            "intergrowth": intergrowth_label_map(v["normal"], v["fine"])}
 
 def build_superpixel_map(rgb: np.ndarray, n_segments: int = 600) -> np.ndarray:
     seg = slic(rgb, n_segments=n_segments, compactness=12, start_label=0)
@@ -64,14 +72,15 @@ def fit_max_side(arr: np.ndarray, max_side: int, interpolation: int) -> np.ndarr
 
 
 def persist_editor_artifacts(jid: str, r: dict) -> None:
-    """Write the phase/talc masks + superpixel/darkness/confidence maps a
-    finished job needs for the Corrector editor. Shared by the closeup and
-    panorama result assembly so both produce identically-shaped, equally
+    """Write the phase/talc/intergrowth masks + superpixel/darkness/confidence
+    maps a finished job needs for the Corrector editor. Shared by the closeup
+    and panorama result assembly so both produce identically-shaped, equally
     editable artifacts."""
     md = paths.masks_dir(jid)
     mp = paths.maps_dir(jid)
     (md / "phases.png").write_bytes(encode_png_gray(r["phase_map"]))
     (md / "talc.png").write_bytes(encode_png_gray((r["talc"].astype(np.uint8) * 255)))
+    (md / "intergrowth.png").write_bytes(encode_png_gray(r["intergrowth"]))
     (mp / "superpixels.png").write_bytes(encode_png_label_rgb(r["superpixels"]))
     (mp / "darkness.png").write_bytes(encode_png_gray(r["darkness"]))
     (mp / "confidence.png").write_bytes(
@@ -81,14 +90,17 @@ def persist_editor_artifacts(jid: str, r: dict) -> None:
 _UNC_MAX_SIDE = 1024  # cap the ensemble-segmentation resolution — the fraction is scale-robust
 
 
-def uncertainty_for_editor(rgb: np.ndarray, cfg) -> dict:
+def uncertainty_for_editor(rgb: np.ndarray, cfg, on_step=None) -> dict:
     """Ensemble-perturbation uncertainty, computed on a downscaled copy for
     speed and the confidence map resized back to `rgb`'s own frame. Shared by
-    closeup and panorama so both report confidence/low_conf_zones the same way."""
+    closeup and panorama so both report confidence/low_conf_zones the same way.
+    `on_step`, if given, is forwarded verbatim to `ensemble_uncertainty` — this
+    function does no progress-fraction scaling itself since callers (closeup,
+    panorama) need different scaling for the same shared computation."""
     h, w = rgb.shape[:2]
     s = min(1.0, _UNC_MAX_SIDE / max(h, w))
     small = cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA) if s < 1 else rgb
-    u = ensemble_uncertainty(small, cfg)
+    u = ensemble_uncertainty(small, cfg, on_step=on_step)
     conf = cv2.resize(u["confidence"], (w, h), interpolation=cv2.INTER_LINEAR)
     return {"confidence": conf, "undetermined_fraction": u["undetermined_fraction"],
             "low_conf_zones": find_low_conf_zones(u)}
