@@ -66,3 +66,10 @@ def test_run_panorama_no_longer_builds_a_tile_painted_overlay(tmp_path):
     run = panorama._run_panorama(str(p), clf, feat, classes, cfg, arr)
     assert "overlay" not in run
     assert "edit_rgb" in run
+
+
+def test_panorama_module_no_longer_defines_sort_rgb():
+    """Unconditional guard (no classifier.pkl needed) against SORT_RGB tile-painting
+    reappearing — the classifier-gated test above covers the runtime behavior, this
+    covers the module surface even when no model is available to run that test."""
+    assert not hasattr(panorama, "SORT_RGB")

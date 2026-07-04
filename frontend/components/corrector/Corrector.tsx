@@ -93,7 +93,11 @@ export function Corrector({
       const talc = await pngToArray(maskUrl(jobId, "talc"), w, h);
       spRef.current = await loadSuperpixels(mapUrl(jobId, "superpixels"), w, h);
       darkRef.current = await pngToArray(mapUrl(jobId, "darkness"), w, h);
-      intergrowthRef.current = await pngToArray(maskUrl(jobId, "intergrowth"), w, h);
+      try {
+        intergrowthRef.current = await pngToArray(maskUrl(jobId, "intergrowth"), w, h);
+      } catch {
+        intergrowthRef.current = null; // job predates this layer — report tab shows the clean photo, no tint
+      }
       const st = initState(Uint8Array.from(phasesGray), Uint8Array.from(talc.map((v) => (v > 127 ? 1 : 0))), w, h);
       srcRef.current = { pm: st.phaseMap, tc: st.talc };
       setState(st);
