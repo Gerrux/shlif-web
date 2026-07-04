@@ -5,6 +5,7 @@ import { imageUrl } from "@/lib/api/client";
 import type { Mode, Verdict } from "@/lib/api/types";
 import { VerdictPanel } from "@/components/verdict/VerdictPanel";
 import { Corrector } from "@/components/corrector/Corrector";
+import { DropZone } from "@/components/upload/DropZone";
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("closeup");
@@ -14,13 +15,10 @@ export default function Home() {
   const analyze = useAnalyze();
   const job = useJob(jobId);
 
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) {
-      setEditing(false);
-      setVOverride(null);
-      analyze.mutate({ file: f, mode }, { onSuccess: (r) => setJobId(r.job_id) });
-    }
+  function handleFile(f: File) {
+    setEditing(false);
+    setVOverride(null);
+    analyze.mutate({ file: f, mode }, { onSuccess: (r) => setJobId(r.job_id) });
   }
   const result = job.data?.status === "done" ? job.data.result : null;
   const shown = result && vOverride ? { ...result, verdict: vOverride } : result;
@@ -30,10 +28,12 @@ export default function Home() {
     <main style={{ maxWidth: 1280, margin: "0 auto", padding: "22px 20px" }}>
       <div className="topbar"><div className="logo">◈</div>
         <div><div className="crumb">Шлиф · классификация руд</div><h1 style={{ margin: 0 }}>Скажи мне кто твой шлиф</h1></div></div>
-      <div style={{ display: "flex", gap: 12, margin: "14px 0" }}>
+      <div style={{ display: "flex", gap: 16, margin: "14px 0 12px", alignItems: "center" }}>
         <label><input type="radio" checked={mode === "closeup"} onChange={() => setMode("closeup")} /> Крупный план</label>
         <label><input type="radio" checked={mode === "panorama"} onChange={() => setMode("panorama")} /> Панорама</label>
-        <input type="file" accept="image/*" onChange={onFile} />
+      </div>
+      <div style={{ marginBottom: 18 }}>
+        <DropZone onFile={handleFile} busy={!!busy} />
       </div>
       <div className="grid2">
         <div className="stage">
