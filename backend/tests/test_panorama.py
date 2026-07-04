@@ -52,31 +52,17 @@ def test_panorama_persists_intergrowth_mask(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(loader.load_classifier() is None, reason="needs models/classifier.pkl")
-def test_panorama_uses_talc_unet_when_available(tmp_path, monkeypatch):
-    """When loader.load_talc_unet() has weights, _run_panorama's per-tile talc
-    decision (which drives the display overlay + ore-density weighting) must
-    come from the U-Net, not the classical detect_talc.
-
-    This checks only that path, not a ban on detect_talc anywhere in
-    analyze_panorama: _assemble_masks (which produces the *reported* verdict)
-    is classical-only regardless of U-Net availability (see this module's
-    docstring — wiring U-Net into _assemble_masks too, mirroring
-    shlif.analyze.analyze_image's ore_mask pattern, is a reasonable follow-up
-    but is new, unreviewed work, not something to fold into this merge) — so
-    it legitimately still calls detect_talc, and a blanket ban would fail for
-    a reason unrelated to what this test is actually checking."""
-    img = (np.random.default_rng(3).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
+def test_run_panorama_no_longer_builds_a_tile_painted_overlay(tmp_path):
+    """SORT_RGB tile-painting was the source of the tile-based look users saw —
+    removed per report-classification-overlay design §4.3. _run_panorama must
+    no longer return an "overlay" key; edit_rgb is the plain stitched photo."""
+    from app.shlif.tiling import load_working_array
+    img = (np.random.default_rng(5).integers(8, 30, (1200, 2400, 3))).astype(np.uint8)
     img[100:400, 100:400] = 210
     p = tmp_path / "pano.jpg"; Image.fromarray(img).save(p, "JPEG")
     cfg = loader.get_config()
-
-    calls = []
-    def fake_talc_unet(rgb, model, device, thr=None):
-        calls.append(1)
-        return np.ones(rgb.shape[:2], bool)
-    monkeypatch.setattr(panorama.loader, "load_talc_unet", lambda: ("fake-model", "cpu"))
-    monkeypatch.setattr(panorama, "talc_unet_mask", fake_talc_unet)
-
-    r = panorama.analyze_panorama(str(p), cfg, "unettest")
-    assert r["mode"] == "panorama"
-    assert len(calls) > 0  # the U-Net talc path was actually exercised, not skipped
+    clf, feat, classes = loader.load_classifier()
+    arr = load_working_array(str(p), cfg.tiling)
+    run = panorama._run_panorama(str(p), clf, feat, classes, cfg, arr)
+    assert "overlay" not in run
+    assert "edit_rgb" in run

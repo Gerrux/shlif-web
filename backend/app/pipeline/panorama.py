@@ -1,23 +1,29 @@
 """Panorama product flow — tile a whole-section scan, classify ore-rich tiles,
-aggregate an ore-area-weighted section verdict, and stitch a display overlay.
+and aggregate an ore-area-weighted section verdict.
 
 Ported from ``hakaton_nornikel/scripts/analyze_panorama.py::run_panorama``. The
 ore/matrix gate routes through the trained U-Net (``ore_unet_mask``, see
 ``backend/app/shlif/ore_unet.py``) when its checkpoint and torch are available,
-falling back to the classical segmenter otherwise; talc per tile similarly
-comes from the trained talc U-Net when its weights are loadable, else the
-classical ``detect_talc``. Torch is never imported at this module's top
-level — only lazily, inside the U-Net loaders/mask functions when a U-Net
-path actually runs — so `import app.pipeline.panorama` still works without
-torch installed.
+falling back to the classical segmenter otherwise. Torch is never imported at
+this module's top level — only lazily, inside the U-Net loaders/mask functions
+when a U-Net path actually runs — so `import app.pipeline.panorama` still works
+without torch installed.
 
 Note: `_assemble_masks` (the whole-canvas mask reconstruction that feeds the
 reported verdict) still uses the classical segmenter only, not the U-Net gate
-`_run_panorama` uses for its own matrix/talc decisions below. Wiring U-Net into
+`_run_panorama` uses for its own matrix decision below. Wiring U-Net into
 `_assemble_masks` too — mirroring how `shlif.analyze.analyze_image` combines an
 `ore_mask` with the classical sulfide/magnetite split — is a reasonable
 follow-up, but is new, undesigned work; deliberately left classical-only here
 rather than improvised during this merge.
+
+The old per-tile display overlay (``SORT_RGB`` painting whole tiles one flat
+colour, blended with ``tile_blend_weight`` feathering) is gone
+(report-classification-overlay design §4.3) — it was a coarse, tile-granular
+stand-in that predates the real per-pixel normal/fine/talc classification, and
+it was the actual source of the "tile-based" look users were seeing. The
+served image is now the plain stitched photo (``edit_rgb``); the client
+renders its own precise overlay on top of it.
 """
 
 from __future__ import annotations
@@ -35,14 +41,11 @@ from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
 from app.shlif.talc import dark_gray_phase, detect_talc
 from app.shlif.ore_unet import ore_unet_mask
-from app.shlif.talc_unet import talc_unet_mask
-from app.shlif.tiling import axis_core_bounds, iter_tiles, load_working_array, tile_blend_weight, tile_grid
+from app.shlif.tiling import axis_core_bounds, iter_tiles, load_working_array, tile_grid
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 from app.pipeline import loader, masks
 from app.core import paths
 
-SORT_RGB = {"ordinary": (80, 190, 120), "hard": (225, 85, 80), "talcose": (95, 140, 235)}
-TALC_RGB = (60, 120, 255)
 ORE_DENSITY_PCT = 92.0  # global brightness percentile that separates ore flecks from silicate
 _UNC_MAX_SIDE = 1024  # cap the ensemble-uncertainty resolution per tile (mirrors closeup.py)
 
@@ -112,15 +115,14 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
 
 def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore: float = 0.04) -> dict:
     """Tile a panorama, classify ore-rich tiles for the `sort` card (ore-density
-    weighted aggregation — unchanged mechanism, see design spec §4.2), estimate
-    per-tile ensemble uncertainty, and stitch the display overlay. Matrix
-    segmentation uses the trained ore/matrix U-Net when available (IoU 0.975 vs
-    classical 0.81), falling back to classical segmentation otherwise; talc
-    similarly prefers the trained talc U-Net over the classical detector. The
-    whole-image phase/talc masks and the `ore_class` verdict come from
-    `_assemble_masks` + `verdict_from_masks` instead (design spec §4.1) — this
-    function no longer decides ore_class."""
-    unet = loader.load_talc_unet()
+    weighted aggregation — unchanged mechanism, see design spec §4.2), and
+    estimate per-tile ensemble uncertainty. Matrix segmentation uses the
+    trained ore/matrix U-Net when available (IoU 0.975 vs classical 0.81),
+    falling back to classical segmentation otherwise. The whole-image
+    phase/talc masks and the `ore_class` verdict come from `_assemble_masks` +
+    `verdict_from_masks` instead (design spec §4.1) — this function no longer
+    decides ore_class, and no longer builds a tile-painted display overlay
+    (report-classification-overlay design §4.3)."""
     ore_bundle = loader.load_ore_unet()
     ore_source = "unet" if ore_bundle is not None else "classical"
 
@@ -131,21 +133,12 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
     ore_pct = float(getattr(cfg.tiling, "ore_density_pct", ORE_DENSITY_PCT))
     bright_thr = float(np.percentile(cv2.cvtColor(edit, cv2.COLOR_RGB2GRAY), ore_pct))
 
-    base = edit.astype(np.float32)
-    # Feathered stitch: accumulate weight*colour per tile and normalise, so
-    # overlapping tiles blend seamlessly in the *display* overlay (no double-
-    # darkened overlap band, no hard seam) — cosmetic only, unrelated to the
-    # whole-canvas mask assembly above.
-    color_num = np.zeros((dh, dw, 3), np.float32)
-    weight_den = np.zeros((dh, dw), np.float32)
-    talc_disp = np.zeros((dh, dw), bool)
     records = []
     low_conf_zones = []
     undet_weighted_sum = 0.0
     undet_px_total = 0
     n_tiles = n_ore = n_matrix = 0
     t0 = time.time()
-    sort_alpha = 0.32
 
     for tile in iter_tiles(path, cfg.tiling, arr=arr):
         n_tiles += 1
@@ -158,18 +151,10 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
             matrix = ~ore_unet_mask(rgb, ore_model, ore_device)
         else:
             matrix = segment_phases(pre, cfg.segment).labels == phases.MATRIX
-        if unet is not None:
-            model, device = unet
-            talc = talc_unet_mask(rgb, model, device, thr=None) & matrix
-        else:
-            talc = detect_talc(pre, matrix, cfg.talc)
         ore_px = int((~matrix).sum())
         ore_frac = ore_px / max(matrix.size, 1)
 
         dx0, dy0 = int(tile.x * rx), int(tile.y * ry)
-        dx1, dy1 = min(int((tile.x + rgb.shape[1]) * rx), dw), min(int((tile.y + rgb.shape[0]) * ry), dh)
-        if dx1 <= dx0 or dy1 <= dy0:
-            continue
 
         th, tw = rgb.shape[:2]
         unc_scale = min(1.0, _UNC_MAX_SIDE / max(th, tw))
@@ -193,32 +178,15 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
             pd = {classes[i]: float(proba[i]) for i in range(len(classes))}
             dens = ore_density(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), bright_thr)
             records.append((pd, dens))
-            col = np.array(SORT_RGB[max(pd, key=lambda k: pd[k])], np.float32)
-            wgt = tile_blend_weight(dy1 - dy0, dx1 - dx0)
-            color_num[dy0:dy1, dx0:dx1] += wgt[..., None] * col
-            weight_den[dy0:dy1, dx0:dx1] += wgt
         else:
             n_matrix += 1
-        if talc.any():
-            td = cv2.resize(talc.astype(np.uint8), (dx1 - dx0, dy1 - dy0),
-                            interpolation=cv2.INTER_NEAREST).astype(bool)
-            talc_disp[dy0:dy1, dx0:dx1] |= td
 
     sec = aggregate_section(records, classes)
     sort_proba = {classes[i]: float(sec[i]) for i in range(len(classes))}
     sort_top = classes[int(sec.argmax())] if records else classes[0]
 
-    overlay = base.copy()
-    cov = weight_den > 0
-    if cov.any():
-        blended = color_num[cov] / weight_den[cov][..., None]
-        overlay[cov] = (1.0 - sort_alpha) * base[cov] + sort_alpha * blended
-    out = overlay
-    out[talc_disp] = 0.68 * out[talc_disp] + 0.32 * np.array(TALC_RGB, np.float32)
-    out = np.clip(out, 0, 255).astype(np.uint8)
-
     return {
-        "overlay": out, "edit_rgb": edit, "sort": {"classes": sort_proba, "top": sort_top},
+        "edit_rgb": edit, "sort": {"classes": sort_proba, "top": sort_top},
         "n_ore": n_ore, "n_matrix": n_matrix, "n_tiles": n_tiles,
         "seconds": time.time() - t0, "factor": factor,
         "undetermined_fraction": undet_weighted_sum / max(undet_px_total, 1),
@@ -251,7 +219,7 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
 
     run = _run_panorama(path, clf, feat, classes, cfg, arr)
     verdict["metrics"]["undetermined_fraction"] = run["undetermined_fraction"]
-    Image.fromarray(run["overlay"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
+    Image.fromarray(run["edit_rgb"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
 
     edit = run["edit_rgb"]
     eh, ew = edit.shape[:2]
@@ -283,7 +251,6 @@ def analyze_panorama(path: str, cfg, jid: str) -> dict:
         "size": [ew, eh],
         "native_size": [W, H],
         "low_conf_zones": run["low_conf_zones"],
-        "overlay_url": f"/api/images/{jid}.jpg",
         "n_ore": run["n_ore"], "n_tiles": run["n_tiles"],
         "ore_source": run["ore_source"],
     }
