@@ -268,7 +268,9 @@ git commit -m "refactor(pipeline): share the uncertainty-ensemble helper between
 - Test: `backend/tests/test_tile_core_bounds.py` (new)
 
 **Interfaces:**
-- Produces: `tiling.load_working_array(path, cfg) -> np.ndarray`; `tiling.iter_tiles(path, cfg, arr: np.ndarray | None = None) -> Iterator[Tile]` (new optional `arr` param, same yielded `Tile` type); `tiling.tile_core_bounds(x: int, y: int, tw: int, th: int, step: int, W: int, H: int) -> tuple[int, int, int, int]`.
+- Produces: `tiling.load_working_array(path, cfg) -> np.ndarray`; `tiling.iter_tiles(path, cfg, arr: np.ndarray | None = None) -> Iterator[Tile]` (new optional `arr` param, same yielded `Tile` type); `tiling.axis_tile_starts(size: int, tile: int, step: int) -> list[int]`; `tiling.axis_core_bounds(size: int, tile: int, step: int) -> dict[int, int]` (maps each tile start along one axis to its non-overlapping core end).
+
+**Design note — why per-axis lookup tables, not a per-tile local check:** an earlier version of this task computed each tile's core end locally from `(x, tw, step, W)` by checking "does this tile's own clipped width reach the canvas edge?" That check is unsound: whenever `tile` exceeds `step` by more than one stride (true for every tile/overlap pair in this project's config), *more than one* tile-start near a row's end independently has its raw pixel data reach the true edge — not only the actual last tile the iterator yields — so a local "am I last?" check cannot tell them apart and produces overlapping cores for a large fraction of real canvas widths (empirically ~13% of widths under this project's default tile=1024/overlap=128). The fix computes the full, ordered sequence of tile starts along an axis **once**, up front — replicating `iter_tiles`' exact loop and its tail-tile size filter — and derives each core's end from the *next* start in that sequence (or the canvas size, for the true last one). This is correct by construction: there is no "is this last?" inference left to get wrong.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -276,44 +278,90 @@ Create `backend/tests/test_tile_core_bounds.py`:
 
 ```python
 """Core-crop reconstruction: each tile contributes only its non-overlapping
-stride when reassembling one continuous canvas from overlapping tiles, so
+core when reassembling one continuous canvas from overlapping tiles, so
 summing every tile's core covers the canvas exactly once (no gap, no
-double count from the overlap band)."""
+double count from the overlap band).
+
+axis_core_bounds derives each tile's core end from the *actual* sequence of
+tile starts iter_tiles will yield along that axis (including its tw/th < 8
+tail-tile skip) -- not from re-deriving "is this the last tile" locally
+from a single tile's own clipped width, which cannot disambiguate a
+genuinely last tile from an earlier tile whose data also happens to reach
+the edge (this happens whenever `tile` is more than one `step` larger than
+the canvas remainder -- a common case with this project's tile/overlap
+ratio, not a rare corner case)."""
 import numpy as np
 
-from app.shlif.tiling import tile_core_bounds
+from app.shlif.tiling import axis_core_bounds, axis_tile_starts
 
 
-def test_tile_core_bounds_middle_tile_is_step_sized():
-    x, y, x1, y1 = tile_core_bounds(x=256, y=0, tw=320, th=320, step=192, W=2000, H=2000)
-    assert (x, y, x1, y1) == (256, 0, 448, 192)
+def test_axis_tile_starts_matches_naive_loop_with_tail_filter():
+    # naive replica of iter_tiles' 1-D loop + tail-tile skip, for comparison
+    size, tile, step = 2000, 320, 256
+    expected = []
+    for x in range(0, max(1, size - 1), step):
+        if min(tile, size - x) < 8:
+            continue
+        expected.append(x)
+    assert axis_tile_starts(size, tile, step) == expected
 
 
-def test_tile_core_bounds_last_tile_extends_to_true_edge():
-    # this tile's pixel data reaches the canvas edge (x + tw >= W) -> no next
-    # tile exists to claim the remainder, so its core must cover it
-    x, y, x1, y1 = tile_core_bounds(x=1800, y=0, tw=200, th=320, step=192, W=2000, H=2000)
-    assert (x1, y1) == (2000, 192)
+def test_axis_core_bounds_last_tile_extends_to_true_edge():
+    bounds = axis_core_bounds(2000, 320, 256)
+    last_start = max(bounds)
+    assert bounds[last_start] == 2000
+
+
+def test_axis_core_bounds_handles_multiple_tail_tiles_reaching_the_edge():
+    # W=1800 with tile=320/step=256: BOTH x=1536 (tw=264) and x=1792 (tw=8)
+    # independently have their raw pixel data reach the true edge (x+tw>=W)
+    # -- exactly the case a per-tile-local "is this last?" check cannot
+    # disambiguate. axis_core_bounds must still give exactly-contiguous,
+    # non-overlapping cores.
+    W, tile, overlap = 1800, 320, 64
+    step = tile - overlap
+    bounds = axis_core_bounds(W, tile, step)
+    starts = sorted(bounds)
+    for i, s in enumerate(starts):
+        expected_end = starts[i + 1] if i + 1 < len(starts) else W
+        assert bounds[s] == expected_end
 
 
 def test_full_grid_reconstruction_has_no_gap_or_overlap():
-    W, H, tile, overlap = 2000, 1500, 320, 64
+    # sweep several (W, H) pairs, including ones where the stride does not
+    # evenly divide the canvas and ones where multiple tail tiles reach the
+    # edge (e.g. W=1800) -- the property must hold for every size, not one
+    # hand-picked pair.
+    tile, overlap = 320, 64
     step = tile - overlap
-    canvas = np.zeros((H, W), np.int32)
-    for y in range(0, max(1, H - 1), step):
-        for x in range(0, max(1, W - 1), step):
-            tw, th = min(tile, W - x), min(tile, H - y)
-            if tw < 8 or th < 8:
-                continue
-            cx0, cy0, cx1, cy1 = tile_core_bounds(x, y, tw, th, step, W, H)
-            canvas[cy0:cy1, cx0:cx1] += 1
-    assert (canvas == 1).all()  # every pixel covered exactly once
+    for W, H in [(2000, 1500), (1800, 1500), (1801, 1499), (2049, 2049), (640, 640)]:
+        x_bounds = axis_core_bounds(W, tile, step)
+        y_bounds = axis_core_bounds(H, tile, step)
+        canvas = np.zeros((H, W), np.int32)
+        for y, y1 in y_bounds.items():
+            for x, x1 in x_bounds.items():
+                canvas[y:y1, x:x1] += 1
+        assert (canvas == 1).all(), f"gap/overlap for W={W}, H={H}"
+
+
+def test_production_tile_overlap_config_has_no_gap_or_overlap_across_many_widths():
+    # the real config (default.yaml): tile=1024, overlap=128 -- sweep a wide
+    # range of widths so we don't rely on one dimension happening to avoid
+    # the defect this reconstruction must rule out for every image size.
+    tile, overlap = 1024, 128
+    step = tile - overlap
+    for W in range(2000, 6000, 137):  # arbitrary irregular stride, broad coverage
+        bounds = axis_core_bounds(W, tile, step)
+        canvas = np.zeros(W, np.int32)
+        for x, x1 in bounds.items():
+            canvas[x:x1] += 1
+        assert (canvas == 1).all(), f"gap/overlap for W={W}"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_tile_core_bounds.py -v`
-Expected: FAIL with `ImportError: cannot import name 'tile_core_bounds'`
+Expected: FAIL with `ImportError: cannot import name 'axis_core_bounds'`
 
 - [ ] **Step 3: Implement**
 
@@ -363,17 +411,31 @@ Then, at the end of `tiling.py`, append:
 ```python
 
 
-def tile_core_bounds(x: int, y: int, tw: int, th: int, step: int, W: int, H: int) -> tuple[int, int, int, int]:
-    """The non-overlapping "core" region a tile contributes when reassembling
-    one continuous canvas from overlapping tiles: ``[x, x+step)`` on each
-    axis, except the last tile in a row/column, which extends all the way to
-    the true canvas edge (the stride does not have to evenly divide the
-    canvas). Consecutive tiles' cores are exactly contiguous (the next tile
-    always starts at ``x+step``), so summing every tile's core covers the
-    canvas once, with no gap and no overlap."""
-    cx1 = W if x + tw >= W else min(x + step, W)
-    cy1 = H if y + th >= H else min(y + step, H)
-    return x, y, cx1, cy1
+def axis_tile_starts(size: int, tile: int, step: int) -> list[int]:
+    """Replicate `iter_tiles`' 1-D loop (`range(0, max(1, size-1), step)`) and
+    its tail-tile skip filter (clipped extent < 8px), returning the actual
+    sequence of tile starts that will be yielded along one axis. Both
+    `iter_tiles` and `axis_core_bounds` derive tile positions from this one
+    function, so "the next tile's start" and "the next tile the iterator
+    actually yields" can never disagree."""
+    starts = []
+    for x in range(0, max(1, size - 1), step):
+        if min(tile, size - x) < 8:
+            continue
+        starts.append(x)
+    return starts
+
+
+def axis_core_bounds(size: int, tile: int, step: int) -> dict[int, int]:
+    """For each tile start along one axis, the non-overlapping core end it
+    contributes when reassembling one continuous canvas: the next tile's
+    start, or `size` for the last tile (no next tile exists to claim the
+    remainder). Consecutive cores are exactly contiguous by construction —
+    this is what makes summing every tile's core cover the canvas once, with
+    no gap and no overlap, regardless of how the stride divides the canvas
+    or how many tail tiles independently reach the true edge."""
+    starts = axis_tile_starts(size, tile, step)
+    return {s: (starts[i + 1] if i + 1 < len(starts) else size) for i, s in enumerate(starts)}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -390,7 +452,7 @@ Expected: PASS (`iter_tiles(path, cfg.tiling)` call sites without `arr=` still w
 
 ```bash
 git add backend/app/shlif/tiling.py backend/tests/test_tile_core_bounds.py
-git commit -m "feat(tiling): load_working_array + tile_core_bounds for whole-canvas mask reassembly"
+git commit -m "feat(tiling): load_working_array + axis_core_bounds for whole-canvas mask reassembly"
 ```
 
 ---
@@ -496,7 +558,7 @@ git commit -m "feat(pipeline): auto-detect closeup/panorama mode from image size
 - Test: `backend/tests/test_panorama_assemble.py` (new)
 
 **Interfaces:**
-- Consumes: `tiling.load_working_array`, `tiling.iter_tiles(..., arr=)`, `tiling.tile_core_bounds` (Task 3); `phases.MATRIX/MAGNETITE/SULFIDE` (`app.shlif.phases`); `segment_phases`, `preprocess`, `detect_talc`, `dark_gray_phase` (all pre-existing).
+- Consumes: `tiling.load_working_array`, `tiling.iter_tiles(..., arr=)`, `tiling.axis_core_bounds` (Task 3); `phases.MATRIX/MAGNETITE/SULFIDE` (`app.shlif.phases`); `segment_phases`, `preprocess`, `detect_talc`, `dark_gray_phase` (all pre-existing).
 - Produces: `panorama._assemble_masks(path: str, cfg, arr: np.ndarray) -> dict` with keys `sulfide, magnetite, matrix, talc, dg` — all boolean arrays shaped `arr.shape[:2]`, partitioning every pixel into exactly one of `sulfide/magnetite/matrix`.
 
 This task only *adds* `_assemble_masks`; it does not yet wire it into `analyze_panorama` (Task 6 does that), so the existing `_run_panorama`/`analyze_panorama` behavior is untouched here.
@@ -578,7 +640,7 @@ from app.shlif.features import extract_features
 from app.shlif.preprocess import preprocess
 from app.shlif.segment import segment_phases
 from app.shlif.talc import dark_gray_phase, detect_talc
-from app.shlif.tiling import iter_tiles, load_working_array, tile_blend_weight, tile_core_bounds, tile_grid
+from app.shlif.tiling import axis_core_bounds, iter_tiles, load_working_array, tile_blend_weight, tile_grid
 from app.pipeline import loader, masks
 from app.core import paths
 ```
@@ -591,7 +653,7 @@ Then insert this new function right after `aggregate_section` (before `def _run_
 def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
     """Tile the section, segment + talc-detect each tile, and reassemble one
     continuous mask set for the whole working canvas — core-crop (no overlap
-    double count, see `tile_core_bounds`) — so `verdict_from_masks` sees the
+    double count, see `axis_core_bounds`) — so `verdict_from_masks` sees the
     same kind of input it gets from a single close-up pass."""
     H, W = arr.shape[:2]
     sulfide = np.zeros((H, W), bool)
@@ -599,14 +661,17 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
     matrix = np.zeros((H, W), bool)
     talc = np.zeros((H, W), bool)
     dg = np.zeros((H, W), bool)
-    step = max(1, int(cfg.tiling.tile) - int(cfg.tiling.overlap))
+    tile_px = int(cfg.tiling.tile)
+    step = max(1, tile_px - int(cfg.tiling.overlap))
+    x_core_end = axis_core_bounds(W, tile_px, step)
+    y_core_end = axis_core_bounds(H, tile_px, step)
 
     for tile in iter_tiles(path, cfg.tiling, arr=arr):
-        th, tw = tile.rgb.shape[:2]
-        cx0, cy0, cx1, cy1 = tile_core_bounds(tile.x, tile.y, tw, th, step, W, H)
-        if cx1 <= cx0 or cy1 <= cy0:
-            continue
-        lx0, ly0, lx1, ly1 = cx0 - tile.x, cy0 - tile.y, cx1 - tile.x, cy1 - tile.y
+        # a tile's core always starts at its own (x, y) — only the end can be
+        # pulled in earlier than the tile's full extent, per axis_core_bounds
+        cx0, cy0 = tile.x, tile.y
+        cx1, cy1 = x_core_end[tile.x], y_core_end[tile.y]
+        lx1, ly1 = cx1 - tile.x, cy1 - tile.y
 
         if tile.empty:
             matrix[cy0:cy1, cx0:cx1] = True
@@ -617,14 +682,16 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray) -> dict:
         tk = detect_talc(pre, seg.labels == phases.MATRIX, cfg.talc)
         dgm, _ = dark_gray_phase(tile.rgb, cfg.talc)
 
-        sulfide[cy0:cy1, cx0:cx1] = seg.sulfide[ly0:ly1, lx0:lx1]
-        magnetite[cy0:cy1, cx0:cx1] = seg.magnetite[ly0:ly1, lx0:lx1]
-        matrix[cy0:cy1, cx0:cx1] = seg.labels[ly0:ly1, lx0:lx1] == phases.MATRIX
-        talc[cy0:cy1, cx0:cx1] = tk[ly0:ly1, lx0:lx1]
-        dg[cy0:cy1, cx0:cx1] = dgm[ly0:ly1, lx0:lx1] & (seg.labels[ly0:ly1, lx0:lx1] == phases.MATRIX)
+        sulfide[cy0:cy1, cx0:cx1] = seg.sulfide[:ly1, :lx1]
+        magnetite[cy0:cy1, cx0:cx1] = seg.magnetite[:ly1, :lx1]
+        matrix[cy0:cy1, cx0:cx1] = seg.labels[:ly1, :lx1] == phases.MATRIX
+        talc[cy0:cy1, cx0:cx1] = tk[:ly1, :lx1]
+        dg[cy0:cy1, cx0:cx1] = dgm[:ly1, :lx1] & (seg.labels[:ly1, :lx1] == phases.MATRIX)
 
     return {"sulfide": sulfide, "magnetite": magnetite, "matrix": matrix, "talc": talc, "dg": dg}
 ```
+
+(`x_core_end`/`y_core_end` are computed once per call, outside the tile loop — `axis_core_bounds` replicates `iter_tiles`' own start/filter logic exactly, so every `tile.x`/`tile.y` the loop yields is guaranteed to be a key in the corresponding dict; no `cx1 <= cx0` guard is needed since core spans are non-empty by construction.)
 
 **Note for the implementer (do not "fix" this):** this re-runs `preprocess`/`segment_phases`/`detect_talc` on each tile a second time (the existing `_run_panorama` loop below still runs its own pass for the overlay + sort classifier). That's an accepted, documented tradeoff (see design spec §"Риски") — merging the two loops is a valid future perf optimization, not required for correctness here. Also note tile-local `preprocess` (gray-world white balance + CLAHE) depends on each tile's own statistics, so `_assemble_masks`'s per-pixel labels will *not* bit-for-bit match a single whole-image `segment_phases` pass — this is pre-existing panorama behavior (already true today), not a bug introduced here. That's why the test above checks the *partition* property and a coarse region sanity check, not exact agreement with a single-pass segmentation.
 
