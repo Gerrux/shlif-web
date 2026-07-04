@@ -253,8 +253,20 @@ git commit -m "feat(uncertainty): report per-perturbation progress via on_step"
 
 ### Task 3: `analyze_closeup` reports progress through its pipeline stages
 
+> **Plan-drift note (recorded during execution, after Task 1 landed):** this task was originally
+> written against a version of `closeup.py` that had a local `_uncertainty` helper. Concurrent work
+> that had already merged into `origin/master` by the time this worktree was created (visible via
+> `git log -- backend/app/pipeline/closeup.py`: `bcce984 refactor(pipeline): share the
+> uncertainty-ensemble helper between closeup and panorama`, part of merge `57f5361`) extracted that
+> helper to `masks.uncertainty_for_editor` in `backend/app/pipeline/masks.py`, shared with panorama
+> (Task 4). The steps below target the **current** `closeup.py`/`masks.py`; the design intent
+> (thread `on_progress` through the existing stage sequence, ensemble sub-progress scaled into
+> 0.30→0.75) is unchanged from the original spec. `backend/app/shlif/uncertainty.py` itself
+> (Task 2's target) was **not** touched by this drift — Task 2 is unaffected.
+
 **Files:**
 - Modify: `backend/app/pipeline/closeup.py`
+- Modify: `backend/app/pipeline/masks.py`
 - Test: `backend/tests/test_closeup_progress.py` (new)
 
 **Interfaces:**
@@ -262,6 +274,10 @@ git commit -m "feat(uncertainty): report per-perturbation progress via on_step"
 - Produces: `analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict` — `on_progress`, when
   given, is `Callable[[float, str], None]`, called multiple times with non-decreasing values in
   `[0, 1]` and a Russian stage message. Used by Task 6. Return dict shape is unchanged from today.
+  Also produces `masks.uncertainty_for_editor(rgb, cfg, on_step=None) -> dict` — `on_step`, when
+  given, is forwarded verbatim to `ensemble_uncertainty`'s `on_step` (no progress-fraction scaling
+  inside `masks.py` — it's a shared helper, and panorama (Task 4) calls it too with its own,
+  different scaling needs; scaling is each caller's own responsibility).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -304,28 +320,34 @@ def test_analyze_closeup_works_without_on_progress():
 Run: `cd backend && .venv/bin/pytest tests/test_closeup_progress.py -v`
 Expected: FAIL with `TypeError: analyze_closeup() got an unexpected keyword argument 'on_progress'`
 
-- [ ] **Step 3: Wire `on_progress` through `closeup.py`**
+- [ ] **Step 3: Add `on_step` passthrough to `masks.uncertainty_for_editor`**
 
-Replace the body of `backend/app/pipeline/closeup.py` from `_uncertainty` down:
+In `backend/app/pipeline/masks.py`, replace the `uncertainty_for_editor` function (it currently ends
+the file):
 
 ```python
-def _uncertainty(rgb: np.ndarray, cfg, on_progress=None) -> dict:
-    """Ensemble-perturbation uncertainty, computed on a downscaled copy for speed
-    and the confidence map resized back to the full frame."""
+def uncertainty_for_editor(rgb: np.ndarray, cfg, on_step=None) -> dict:
+    """Ensemble-perturbation uncertainty, computed on a downscaled copy for
+    speed and the confidence map resized back to `rgb`'s own frame. Shared by
+    closeup and panorama so both report confidence/low_conf_zones the same way.
+    `on_step`, if given, is forwarded verbatim to `ensemble_uncertainty` — this
+    function does no progress-fraction scaling itself since callers (closeup,
+    panorama) need different scaling for the same shared computation."""
     h, w = rgb.shape[:2]
     s = min(1.0, _UNC_MAX_SIDE / max(h, w))
     small = cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA) if s < 1 else rgb
-
-    def on_step(i, total):
-        if on_progress:
-            on_progress(0.30 + 0.45 * (i / total), f"оценка неопределённости ({i}/{total})")
-
     u = ensemble_uncertainty(small, cfg, on_step=on_step)
     conf = cv2.resize(u["confidence"], (w, h), interpolation=cv2.INTER_LINEAR)
     return {"confidence": conf, "undetermined_fraction": u["undetermined_fraction"],
             "low_conf_zones": find_low_conf_zones(u)}
+```
 
+- [ ] **Step 4: Wire `on_progress` through `closeup.py`**
 
+Replace `backend/app/pipeline/closeup.py`'s `analyze_closeup` function (the whole file's only other
+function besides `_sort_card`, which is unchanged):
+
+```python
 def analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict:
     """Uses the trained talc U-Net when its weights are loadable (GPU or CPU);
     falls back to the classical darkness-based talc seed when they aren't."""
@@ -346,7 +368,12 @@ def analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict:
     phase_map = masks.phase_label_map(m["sulfide"], m["magnetite"])
 
     report(0.30, "оценка неопределённости")
-    unc = _uncertainty(rgb, cfg, on_progress=on_progress)
+
+    def on_step(i, total):
+        if on_progress:
+            on_progress(0.30 + 0.45 * (i / total), f"оценка неопределённости ({i}/{total})")
+
+    unc = masks.uncertainty_for_editor(rgb, cfg, on_step=on_step)
     metrics = dict(res.metrics)
     metrics["undetermined_fraction"] = unc["undetermined_fraction"]
 
@@ -370,43 +397,60 @@ def analyze_closeup(rgb: np.ndarray, cfg, on_progress=None) -> dict:
     }
 ```
 
-(`_uncertainty` is called with `on_progress=on_progress` — the raw callback, not `report` — so its
-internal `on_step` scaling above computes the 0.30→0.75 range correctly relative to the job's
-overall progress, not relative to `report`'s own no-op-if-`None` wrapper.)
+(The 0.30→0.75 ensemble sub-progress scaling now lives in `closeup.py`'s own `on_step` closure,
+*not* inside `masks.uncertainty_for_editor` — that function is shared with panorama, which needs a
+different scaling for the same call. Do not move this scaling into `masks.py`.)
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd backend && .venv/bin/pytest tests/test_closeup_progress.py tests/test_pipeline.py tests/test_closeup_uncertainty.py tests/test_api_uncertainty.py -v`
 Expected: PASS (new tests plus the 3 pre-existing files that exercise `analyze_closeup`)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/pipeline/closeup.py backend/tests/test_closeup_progress.py
+git add backend/app/pipeline/closeup.py backend/app/pipeline/masks.py backend/tests/test_closeup_progress.py
 git commit -m "feat(closeup): report progress across pipeline stages"
 ```
 
 ---
 
-### Task 4: `analyze_panorama` reports progress through the tile loop
+### Task 4: `analyze_panorama` reports progress through its two tile loops
+
+> **Plan-drift note (recorded during execution):** this task was originally written against a much
+> simpler `panorama.py` (one tile loop, `_run_panorama` returning the verdict directly, a
+> `display_mp`-based single decode). Concurrent work already merged into `origin/master` before this
+> worktree was created (`git log -- backend/app/pipeline/panorama.py`: merge `57f5361`, plus
+> `0565bd3 feat(panorama): verdict + sort + editable artifacts now match closeup's shape exactly` and
+> `ee691d8 feat(panorama): assemble one whole-canvas phase/talc mask via core-crop tiling`)
+> restructured the panorama pipeline into **two** tile loops — `_assemble_masks` (builds the
+> whole-canvas phase/talc masks that drive the reported verdict, via `verdict_from_masks_dict`) and
+> `_run_panorama` (classifies ore tiles for the sort card, runs per-tile ensemble uncertainty, and
+> stitches the display overlay) — plus a single extra `masks.uncertainty_for_editor` pass at the end
+> for the editor's confidence layer. The design intent is unchanged (thread `on_progress` through
+> every loop that already exists, using `count_tiles` from Task 1 for the shared tile-count
+> denominator); the steps below target the **current** `panorama.py`.
 
 **Files:**
 - Modify: `backend/app/pipeline/panorama.py`
 - Test: `backend/tests/test_panorama_progress.py` (new)
 
 **Interfaces:**
-- Consumes: `count_tiles(path, cfg) -> int` from Task 1.
-- Produces: `_run_panorama(path, clf, feat_names, classes, cfg, min_ore=0.04, display_mp=DISPLAY_MP,
-  on_progress=None) -> dict` and `analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict`
-  — `on_progress`, when given, is `Callable[[float, str], None]`, called multiple times with
-  non-decreasing values in `[0, 1]`. Used by Task 6. Return dict shape unchanged.
+- Consumes: `count_tiles(path, cfg) -> int` from Task 1; `masks.uncertainty_for_editor(rgb, cfg,
+  on_step=None)` from Task 3.
+- Produces: `_assemble_masks(path, cfg, arr, on_progress=None) -> dict`, `_run_panorama(path, clf,
+  feat_names, classes, cfg, arr, min_ore=0.04, on_progress=None) -> dict`, and
+  `analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict` — `on_progress`, when given,
+  is `Callable[[float, str], None]`, called multiple times with non-decreasing values in `[0, 1]`.
+  Used by Task 6. Return dict shapes unchanged from today.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `backend/tests/test_panorama_progress.py`:
 
 ```python
-"""analyze_panorama reports progress through on_progress across the tile loop."""
+"""analyze_panorama reports progress through on_progress across both tile loops
+(_assemble_masks, _run_panorama) and the tail stages."""
 import numpy as np
 import pytest
 from PIL import Image
@@ -427,11 +471,12 @@ def test_panorama_reports_progress(tmp_path):
                                    on_progress=lambda pr, msg: calls.append((pr, msg)))
 
     assert r["mode"] == "panorama"
-    assert len(calls) >= 3
+    assert len(calls) >= 5
     progresses = [pr for pr, _ in calls]
     assert progresses == sorted(progresses)
     assert all(0.0 <= pr <= 1.0 for pr in progresses)
     messages = " ".join(msg for _, msg in calls if msg)
+    assert "сборка масок" in messages
     assert "сегментация тайлов" in messages
 ```
 
@@ -444,56 +489,109 @@ and confirm via Step 4 that it's collected correctly)
 
 - [ ] **Step 3: Wire `on_progress` through `panorama.py`**
 
-In `backend/app/pipeline/panorama.py`, update the import line and both functions:
+In `backend/app/pipeline/panorama.py`, update the `tiling` import line to add `count_tiles`:
 
 ```python
-from app.shlif.tiling import iter_tiles, tile_blend_weight, tile_grid, count_tiles
+from app.shlif.tiling import axis_core_bounds, count_tiles, iter_tiles, load_working_array, tile_blend_weight, tile_grid
 ```
 
-```python
-def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
-                  display_mp: int = DISPLAY_MP, on_progress=None) -> dict:
-    """Tile a panorama, classify ore-rich tiles, aggregate a section verdict, and
-    stitch a display overlay. Returns a dict with `overlay` (RGB uint8, no banner)
-    plus verdict fields. `cfg.tiling.tile` and `cfg.talc.detect_dark_frac` should
-    already be set by the caller. Matrix segmentation uses the trained U-Net when
-    available, falling back to classical segmentation otherwise; talc per tile
-    comes from the trained talc U-Net when its weights are loadable, else the
-    classical detect_talc. `on_progress(progress, message)`, if given, is called
-    at each tile and at major stage boundaries."""
-    def report(p, msg):
-        if on_progress:
-            on_progress(p, msg)
+Replace `_assemble_masks`:
 
+```python
+def _assemble_masks(path: str, cfg, arr: np.ndarray, on_progress=None) -> dict:
+    """Tile the section, segment + talc-detect each tile, and reassemble one
+    continuous mask set for the whole working canvas — core-crop (no overlap
+    double count, see `axis_core_bounds`) — so `verdict_from_masks` sees the
+    same kind of input it gets from a single close-up pass. Classical
+    segmentation only (see module docstring). `on_progress(progress, message)`,
+    if given, is called once per tile, scaled into the 0.05-0.35 job-progress
+    range (this is the first of panorama's two tile loops)."""
+    H, W = arr.shape[:2]
+    sulfide = np.zeros((H, W), bool)
+    magnetite = np.zeros((H, W), bool)
+    matrix = np.zeros((H, W), bool)
+    talc = np.zeros((H, W), bool)
+    dg = np.zeros((H, W), bool)
+    tile_px = int(cfg.tiling.tile)
+    step = max(1, tile_px - int(cfg.tiling.overlap))
+    x_core_end = axis_core_bounds(W, tile_px, step)
+    y_core_end = axis_core_bounds(H, tile_px, step)
+    total = max(1, count_tiles(path, cfg.tiling))
+    n = 0
+
+    for tile in iter_tiles(path, cfg.tiling, arr=arr):
+        n += 1
+        if on_progress:
+            on_progress(0.05 + 0.30 * min(1.0, n / total), f"сборка масок ({n}/{total})")
+        cx0, cy0 = tile.x, tile.y
+        cx1, cy1 = x_core_end[tile.x], y_core_end[tile.y]
+        lx1, ly1 = cx1 - tile.x, cy1 - tile.y
+
+        if tile.empty:
+            matrix[cy0:cy1, cx0:cx1] = True
+            continue
+
+        pre = preprocess(tile.rgb, cfg.preprocess)
+        seg = segment_phases(pre, cfg.segment)
+        tk = detect_talc(pre, seg.labels == phases.MATRIX, cfg.talc)
+        dgm, _ = dark_gray_phase(tile.rgb, cfg.talc)
+
+        sulfide[cy0:cy1, cx0:cx1] = seg.sulfide[:ly1, :lx1]
+        magnetite[cy0:cy1, cx0:cx1] = seg.magnetite[:ly1, :lx1]
+        matrix[cy0:cy1, cx0:cx1] = seg.labels[:ly1, :lx1] == phases.MATRIX
+        talc[cy0:cy1, cx0:cx1] = tk[:ly1, :lx1]
+        dg[cy0:cy1, cx0:cx1] = dgm[:ly1, :lx1] & (seg.labels[:ly1, :lx1] == phases.MATRIX)
+
+    return {"sulfide": sulfide, "magnetite": magnetite, "matrix": matrix, "talc": talc, "dg": dg}
+```
+
+Replace `_run_panorama` (only the signature, the `total_tiles_est` line, and the `on_progress` call
+inside the tile loop are new — every other line is unchanged from today):
+
+```python
+def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore: float = 0.04,
+                  on_progress=None) -> dict:
+    """Tile a panorama, classify ore-rich tiles for the `sort` card (ore-density
+    weighted aggregation — unchanged mechanism, see design spec §4.2), estimate
+    per-tile ensemble uncertainty, and stitch the display overlay. Matrix
+    segmentation uses the trained ore/matrix U-Net when available (IoU 0.975 vs
+    classical 0.81), falling back to classical segmentation otherwise; talc
+    similarly prefers the trained talc U-Net over the classical detector. The
+    whole-image phase/talc masks and the `ore_class` verdict come from
+    `_assemble_masks` + `verdict_from_masks` instead (design spec §4.1) — this
+    function no longer decides ore_class. `on_progress(progress, message)`, if
+    given, is called once per tile, scaled into the 0.35-0.85 job-progress
+    range (this is the second of panorama's two tile loops, and the more
+    expensive one — it runs a 5-perturbation ensemble per tile)."""
     unet = loader.load_talc_unet()
-    report(0.05, "загрузка модели")
-    Wt, Ht, factor = tile_grid(path, cfg.tiling)
-    disp = load_rgb(path, max_pixels=display_mp)
-    dh, dw = disp.shape[:2]
-    rx, ry = dw / Wt, dh / Ht
-    ore_pct = float(getattr(cfg.tiling, "ore_density_pct", ORE_DENSITY_PCT))
-    bright_thr = float(np.percentile(cv2.cvtColor(disp, cv2.COLOR_RGB2GRAY), ore_pct))
     ore_bundle = loader.load_ore_unet()
     ore_source = "unet" if ore_bundle is not None else "classical"
-    total_tiles_est = max(1, count_tiles(path, cfg.tiling))
 
-    base = disp.astype(np.float32)
+    Wt, Ht, factor = tile_grid(path, cfg.tiling)
+    edit = masks.fit_max_side(arr, masks.EDIT_MAX_SIDE, cv2.INTER_AREA)
+    dh, dw = edit.shape[:2]
+    rx, ry = dw / Wt, dh / Ht
+    ore_pct = float(getattr(cfg.tiling, "ore_density_pct", ORE_DENSITY_PCT))
+    bright_thr = float(np.percentile(cv2.cvtColor(edit, cv2.COLOR_RGB2GRAY), ore_pct))
+
+    base = edit.astype(np.float32)
     color_num = np.zeros((dh, dw, 3), np.float32)
     weight_den = np.zeros((dh, dw), np.float32)
     talc_disp = np.zeros((dh, dw), bool)
     records = []
     low_conf_zones = []
-    talc_px = matrix_px = 0
     undet_weighted_sum = 0.0
     undet_px_total = 0
     n_tiles = n_ore = n_matrix = 0
     t0 = time.time()
     sort_alpha = 0.32
+    total_tiles_est = max(1, count_tiles(path, cfg.tiling))
 
-    for tile in iter_tiles(path, cfg.tiling):
+    for tile in iter_tiles(path, cfg.tiling, arr=arr):
         n_tiles += 1
-        report(0.10 + 0.80 * min(1.0, n_tiles / total_tiles_est),
-               f"сегментация тайлов ({n_tiles}/{total_tiles_est})")
+        if on_progress:
+            on_progress(0.35 + 0.50 * min(1.0, n_tiles / total_tiles_est),
+                        f"сегментация тайлов ({n_tiles}/{total_tiles_est})")
         if tile.empty:
             continue
         rgb = tile.rgb
@@ -502,7 +600,7 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
             ore_model, ore_device = ore_bundle
             matrix = ~ore_unet_mask(rgb, ore_model, ore_device)
         else:
-            matrix = segment_phases(pre, cfg.segment).labels == 0
+            matrix = segment_phases(pre, cfg.segment).labels == phases.MATRIX
         if unet is not None:
             model, device = unet
             talc = talc_unet_mask(rgb, model, device, thr=None) & matrix
@@ -510,7 +608,6 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
             talc = detect_talc(pre, matrix, cfg.talc)
         ore_px = int((~matrix).sum())
         ore_frac = ore_px / max(matrix.size, 1)
-        talc_px += int(talc.sum()); matrix_px += int(matrix.sum())
 
         dx0, dy0 = int(tile.x * rx), int(tile.y * ry)
         dx1, dy1 = min(int((tile.x + rgb.shape[1]) * rx), dw), min(int((tile.y + rgb.shape[0]) * ry), dh)
@@ -550,10 +647,9 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
                             interpolation=cv2.INTER_NEAREST).astype(bool)
             talc_disp[dy0:dy1, dx0:dx1] |= td
 
-    report(0.92, "построение карты сорта")
     sec = aggregate_section(records, classes)
-    verdict = classes[int(sec.argmax())] if records else "review"
-    conf = float(sec.max()) if records else 0.0
+    sort_proba = {classes[i]: float(sec[i]) for i in range(len(classes))}
+    sort_top = classes[int(sec.argmax())] if records else classes[0]
 
     overlay = base.copy()
     cov = weight_den > 0
@@ -565,19 +661,27 @@ def _run_panorama(path, clf, feat_names, classes, cfg, min_ore: float = 0.04,
     out = np.clip(out, 0, 255).astype(np.uint8)
 
     return {
-        "overlay": out, "verdict": verdict, "conf": conf,
-        "proba": {classes[i]: float(sec[i]) for i in range(len(classes))},
-        "talc_frac": talc_px / max(talc_px + matrix_px, 1),
+        "overlay": out, "edit_rgb": edit, "sort": {"classes": sort_proba, "top": sort_top},
         "n_ore": n_ore, "n_matrix": n_matrix, "n_tiles": n_tiles,
         "seconds": time.time() - t0, "factor": factor,
         "undetermined_fraction": undet_weighted_sum / max(undet_px_total, 1),
         "low_conf_zones": low_conf_zones,
         "ore_source": ore_source,
     }
+```
 
+Replace `analyze_panorama`:
 
+```python
 def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
-    """Public wrapper called by the API for `mode=="panorama"`."""
+    """Public wrapper called by the API. Builds the whole-canvas phase/talc
+    masks (design spec §4) and reuses `verdict_from_masks_dict` — the exact
+    helper close-up uses — so the result has the same shape and the same
+    meaning, computed over the whole image instead of per tile."""
+    def report(p, msg):
+        if on_progress:
+            on_progress(p, msg)
+
     cfg = copy.deepcopy(cfg)  # don't mutate the shared @lru_cache'd Config
     cfg.tiling.tile = 2048
     cfg.talc.detect_dark_frac = 0.15
@@ -585,26 +689,59 @@ def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
     if bundle is None:
         raise RuntimeError("classifier.pkl required for panorama sort")
     clf, feat, classes = bundle
-    r = _run_panorama(path, clf, feat, classes, cfg, on_progress=on_progress)
-    if on_progress:
-        on_progress(0.97, "сохранение результатов")
-    out = paths.images_dir() / f"{jid}.jpg"
-    Image.fromarray(r["overlay"]).save(out, "JPEG", quality=88)
+
+    report(0.03, "загрузка изображения")
+    arr = load_working_array(path, cfg.tiling)
+    H, W = arr.shape[:2]
+
+    assembled = _assemble_masks(path, cfg, arr, on_progress=on_progress)
+    report(0.35, "вердикт по фазам")
+    verdict = masks.verdict_from_masks_dict(
+        assembled["sulfide"], assembled["magnetite"], assembled["matrix"], assembled["talc"], cfg)
+    verdict["metrics"]["talc_share_est"] = float(assembled["dg"].mean())
+
+    run = _run_panorama(path, clf, feat, classes, cfg, arr, on_progress=on_progress)
+    verdict["metrics"]["undetermined_fraction"] = run["undetermined_fraction"]
+    report(0.85, "сохранение оверлея")
+    Image.fromarray(run["overlay"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
+
+    edit = run["edit_rgb"]
+    eh, ew = edit.shape[:2]
+    sulfide_small = cv2.resize(assembled["sulfide"].astype(np.uint8), (ew, eh),
+                               interpolation=cv2.INTER_NEAREST) > 0
+    magnetite_small = cv2.resize(assembled["magnetite"].astype(np.uint8), (ew, eh),
+                                 interpolation=cv2.INTER_NEAREST) > 0
+    talc_small = cv2.resize(assembled["talc"].astype(np.uint8), (ew, eh),
+                            interpolation=cv2.INTER_NEAREST) > 0
+    phase_small = masks.phase_label_map(sulfide_small, magnetite_small)
+    report(0.88, "карта уверенности для редактора")
+    unc = masks.uncertainty_for_editor(edit, cfg)
+
+    report(0.93, "построение карт")
+    masks.persist_editor_artifacts(jid, {
+        "phase_map": phase_small, "talc": talc_small,
+        "superpixels": masks.build_superpixel_map(edit),
+        "darkness": masks.build_darkness_map(edit),
+        "confidence": unc["confidence"],
+    })
+
     return {
         "mode": "panorama",
-        "verdict": {"ore_class": r["verdict"], "text": "",
-                    "metrics": {"talc_frac": r["talc_frac"], "confidence": r["conf"],
-                                "sort_proba": r["proba"],
-                                "undetermined_fraction": r["undetermined_fraction"]}},
+        "verdict": verdict,
+        "sort": run["sort"],
+        "text": verdict["text"],
+        "size": [ew, eh],
+        "native_size": [W, H],
+        "low_conf_zones": run["low_conf_zones"],
         "overlay_url": f"/api/images/{jid}.jpg",
-        "n_ore": r["n_ore"], "n_tiles": r["n_tiles"], "talc_frac": r["talc_frac"],
-        "low_conf_zones": r["low_conf_zones"], "ore_source": r["ore_source"],
+        "n_ore": run["n_ore"], "n_tiles": run["n_tiles"],
+        "ore_source": run["ore_source"],
     }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend && .venv/bin/pytest tests/test_panorama_progress.py tests/test_panorama.py tests/test_panorama_aggregate.py tests/test_panorama_uncertainty.py tests/test_panorama_unet_gate.py -v`
+Run: `cd backend && .venv/bin/pytest tests/test_panorama_progress.py tests/test_panorama.py tests/test_panorama_assemble.py tests/test_panorama_aggregate.py tests/test_panorama_uncertainty.py tests/test_panorama_unet_gate.py -v`
 Expected: PASS (or SKIPPED for the classifier-gated tests if `models/classifier.pkl` is absent —
 either way, no FAIL/ERROR)
 
@@ -612,7 +749,7 @@ either way, no FAIL/ERROR)
 
 ```bash
 git add backend/app/pipeline/panorama.py backend/tests/test_panorama_progress.py
-git commit -m "feat(panorama): report progress through the tile loop"
+git commit -m "feat(panorama): report progress through both tile loops"
 ```
 
 ---
@@ -753,6 +890,18 @@ git commit -m "feat(jobs): pass a report callback into submitted work"
 
 ### Task 6: wire `report` through the `/api/analyze` endpoint
 
+> **Plan-drift note (recorded during execution):** this task was originally written against a
+> version of the endpoint that took a client-supplied `mode: str = Form("closeup")` field. Concurrent
+> work already merged into `origin/master` before this worktree was created (`git log -- 
+> backend/app/api/analyze.py`: `22f9e63 feat(api): auto-detect closeup/panorama mode server-side, no
+> client mode field`) replaced that with server-side detection via `app.pipeline.detect.detect_mode`,
+> and relocated the close-up thumbnail budget/artifact-persist helpers to `masks.EDIT_MAX_SIDE`/
+> `masks.persist_editor_artifacts` (this module no longer has a local `_persist_maps`). The design
+> intent is unchanged (thread `report` into `work()`, call it before/after the two expensive
+> closeup steps); the steps below target the **current** `analyze.py` and `test_api.py` (which
+> already dropped the `mode` form field — see `git log`: `4166fc3 test: drop the client-supplied mode
+> field now that the API auto-detects it`).
+
 **Files:**
 - Modify: `backend/app/api/analyze.py`
 - Test: `backend/tests/test_api.py`
@@ -771,13 +920,14 @@ In `backend/tests/test_api.py`, add one assertion to `test_closeup_analyze_and_e
 ```python
 def test_closeup_analyze_and_edit(tiny_rgb):
     c = TestClient(app)
-    up = c.post("/api/analyze", data={"mode": "closeup"},
+    up = c.post("/api/analyze",
                 files={"image": ("t.png", _png_bytes(tiny_rgb), "image/png")})
     assert up.status_code == 200
     jid = up.json()["job_id"]
     done = _poll(c, jid)
     assert done["status"] == "done"
     assert done["progress"] == 1.0
+    assert done["result"]["mode"] == "closeup"  # tiny_rgb (256x256) is well under direct_max_pixels
     assert done["result"]["verdict"]["ore_class"] in {"ordinary","hard","talcose","review"}
 
     # layers + maps are fetchable
@@ -796,6 +946,9 @@ def test_closeup_analyze_and_edit(tiny_rgb):
     assert r.json()["ore_class"] == "talcose"
 ```
 
+(Only the two new lines — `assert done["progress"] == 1.0` and the `mode` assertion's comment
+context — are new; everything else in this test is unchanged from today.)
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && .venv/bin/pytest tests/test_api.py -v`
@@ -805,29 +958,32 @@ the test then fails on `assert done["status"] == "done"`.
 
 - [ ] **Step 3: Wire `report` through `work()`**
 
-Replace `backend/app/api/analyze.py`'s `analyze` route body:
+Replace `backend/app/api/analyze.py`'s `analyze` route body (the `Image.MAX_IMAGE_PIXELS = None` line
+and the imports above it are unchanged):
 
 ```python
 @router.post("/analyze")
-async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
+async def analyze(image: UploadFile = File(...)):
     data = await image.read()
+    cfg = loader.get_config()
+    iw, ih = Image.open(io.BytesIO(data)).size
+    mode = detect.detect_mode(iw, ih, cfg)
     jid = get_runtime().store.create(mode)
     up = paths.uploads_dir() / f"{jid}_{Path(image.filename or 'up').name}"
     up.write_bytes(data)
 
     def work(report):
-        cfg = loader.get_config()
         if mode == "panorama":
             return panorama.analyze_panorama(str(up), cfg, jid, on_progress=report)
         report(0.05, "загрузка изображения")
         im = Image.open(io.BytesIO(data)).convert("RGB")
-        im.thumbnail((2400, 2400))
+        im.thumbnail((masks.EDIT_MAX_SIDE, masks.EDIT_MAX_SIDE))
         rgb = np.asarray(im)
         r = closeup.analyze_closeup(rgb, cfg, on_progress=report)
         report(0.95, "сохранение результатов")
         disp = paths.images_dir() / f"{jid}.jpg"
         Image.fromarray(rgb).save(disp, "JPEG", quality=90)
-        _persist_maps(jid, r)
+        masks.persist_editor_artifacts(jid, r)
         h, w = rgb.shape[:2]
         return {"mode": "closeup", "verdict": r["verdict"], "sort": r["sort"],
                 "text": r["text"], "size": [w, h],
@@ -836,9 +992,6 @@ async def analyze(image: UploadFile = File(...), mode: str = Form("closeup")):
     get_runtime().runner.submit(jid, work)
     return {"job_id": jid}
 ```
-
-(Only the `analyze` function body changes; `_persist_maps` and the module imports above it are
-unchanged.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1022,6 +1175,18 @@ git commit -m "feat(frontend): add AnalysisProgress component"
 
 ### Task 9: wire `AnalysisProgress` into the workspace placeholder
 
+> **Plan-drift note (recorded during execution):** this task was originally written against a
+> version of `page.tsx` with a manual closeup/panorama mode toggle and a separate
+> `PanoramaWorkspace` view. Concurrent work already merged into `origin/master` before this worktree
+> was created (`git log -- frontend/app/page.tsx`: `0f0add3 feat(frontend): remove the mode toggle,
+> edit panorama masks like closeup`) removed the toggle entirely — mode is now auto-detected
+> server-side (Task 6's `detect.detect_mode`) and both closeup and panorama results render through
+> the same `Corrector` component (`PanoramaWorkspace.tsx` is no longer imported anywhere — confirmed
+> via `grep -rn "PanoramaWorkspace" frontend/app frontend/components`, zero matches). The design
+> intent is unchanged (swap the static placeholder for `AnalysisProgress`, track `startedAt`); the
+> steps below target the **current** `page.tsx`, which is simpler than originally planned (no
+> mode-conditional branching needed anywhere in this task).
+
 **Files:**
 - Modify: `frontend/app/page.tsx`
 
@@ -1031,14 +1196,16 @@ git commit -m "feat(frontend): add AnalysisProgress component"
 
 - [ ] **Step 1: Add `startedAt` state and set it in `runAnalyze`**
 
-In `frontend/app/page.tsx`, add the import and state, and set `startedAt` in `runAnalyze`:
+In `frontend/app/page.tsx`, add the import alongside the existing component imports:
 
 ```tsx
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 ```
 
+Add `startedAt` state and set it in `runAnalyze`:
+
 ```tsx
-  const [mode, setMode] = useState<Mode>("closeup");
+export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -1046,12 +1213,12 @@ import { AnalysisProgress } from "@/components/AnalysisProgress";
   const analyze = useAnalyze();
   const job = useJob(jobId);
 
-  function runAnalyze(f: File, m: Mode) {
+  function runAnalyze(f: File) {
     setFile(f);
     setVOverride(null);
     setJobId(null);
     setStartedAt(Date.now());
-    analyze.mutate({ file: f, mode: m }, { onSuccess: (r) => setJobId(r.job_id) });
+    analyze.mutate({ file: f }, { onSuccess: (r) => setJobId(r.job_id) });
   }
 ```
 
@@ -1061,10 +1228,8 @@ Replace the `stage-empty` block currently at the end of `Home()` (the non-error 
 `job.data?.status === "error"` ternary inside `.zoom-vp`):
 
 ```tsx
-      {result && mode === "closeup" && result.size ? (
+      {result && result.size ? (
         <Corrector jobId={jobId!} size={result.size} info={infoNode} onVerdict={setVOverride} />
-      ) : result && mode === "panorama" ? (
-        <PanoramaWorkspace src={shown!.overlay_url ?? imageUrl(jobId!)} info={infoNode} />
       ) : (
         <div className="workspace">
           <aside className="ws-side">{infoNode}</aside>
@@ -1080,9 +1245,7 @@ Replace the `stage-empty` block currently at the end of `Home()` (the non-error 
                 <AnalysisProgress
                   job={job.data}
                   startedAt={startedAt ?? Date.now()}
-                  fallback={jobId
-                    ? (mode === "panorama" ? "панорама · сегментация тайлов" : "крупный план · сегментация фаз")
-                    : "загрузка файла на сервер"}
+                  fallback={jobId ? "сегментация фаз" : "загрузка файла на сервер"}
                 />
               )}
             </div>
@@ -1090,6 +1253,10 @@ Replace the `stage-empty` block currently at the end of `Home()` (the non-error 
         </div>
       )}
 ```
+
+(Mode isn't known client-side until the job resolves — the server auto-detects it — so, unlike the
+original plan, there's no mode-conditional fallback text here; `"сегментация фаз"` matches today's
+existing hardcoded fallback copy.)
 
 - [ ] **Step 3: Type-check and run frontend tests**
 
