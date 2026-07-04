@@ -240,20 +240,15 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   radial-gradient(ellipse 70% 60% at 50% 42%, transparent 0%, oklch(14% 0.012 258 / .5) 66%, oklch(11% 0.012 258 / .86) 100%),
   linear-gradient(180deg, oklch(14% 0.012 258 / .3), transparent 30%, oklch(12% 0.012 258 / .5)); }
 .welcome-inner { position: relative; text-align: center; max-width: 760px; display: flex; flex-direction: column; align-items: center; }
-.welcome-badge { display: inline-flex; align-items: center; gap: 9px; padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em; color: oklch(90% 0.03 74); background: oklch(100% 0 0 / .06); border: 1px solid oklch(100% 0 0 / .13); backdrop-filter: blur(6px); margin-bottom: 24px; }
-.welcome-badge .ping { position: relative; width: 8px; height: 8px; flex-shrink: 0; }
-.welcome-badge .ping::before, .welcome-badge .ping::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--brand); }
-.welcome-badge .ping::before { animation: ping 1.9s cubic-bezier(0,0,.2,1) infinite; }
-@keyframes ping { 75%, 100% { transform: scale(2.4); opacity: 0; } }
 .welcome-title { margin: 0; font-size: clamp(42px, 7.4vw, 86px); font-weight: 700; letter-spacing: -0.035em; line-height: 1.0; display: inline-flex; align-items: center; gap: 0.22em; flex-wrap: wrap; justify-content: center; }
-.welcome-title .wm { background: linear-gradient(92deg, oklch(98% 0.006 250) 8%, oklch(82% 0.10 76) 96%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; }
-.welcome-title .rocket { -webkit-text-fill-color: initial; filter: drop-shadow(0 4px 14px oklch(60% 0.16 60 / .5)); }
+.welcome-title .wm { color: oklch(98% 0.006 250); }
+.welcome-title .rocket { filter: drop-shadow(0 4px 14px oklch(60% 0.16 60 / .5)); }
 .welcome-tagline { margin: 16px 0 0; font-size: clamp(16px, 2.3vw, 22px); font-weight: 500; color: oklch(87% 0.02 250); letter-spacing: -0.01em; }
 .welcome-desc { margin: 18px auto 32px; max-width: 620px; font-size: 15px; line-height: 1.62; color: oklch(74% 0.015 250); }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: center; }
 .welcome-cta .arrow { transition: transform .3s; }
 .welcome-cta:hover .arrow { transform: translateX(3px); }
-@media (prefers-reduced-motion: reduce) { .welcome-badge .ping::before, .welcome:hover .welcome-bg { animation: none; transition: none; } }
+@media (prefers-reduced-motion: reduce) { .welcome:hover .welcome-bg { transition: none; } }
 /* Полноэкранный welcome */
 .welcome.full { min-height: 100dvh; border-radius: 0; border: 0; margin: 0; padding: clamp(40px, 8vh, 96px) 24px; }
 .theme-float { position: fixed; top: 16px; right: 18px; z-index: 30; }
