@@ -83,6 +83,7 @@ export function Corrector({
       const off = document.createElement("canvas"); off.width = w; off.height = h;
       const octx = off.getContext("2d")!; octx.drawImage(bmp, 0, 0, w, h);
       baseRGBA.current = octx.getImageData(0, 0, w, h).data;
+      enhancedRGBA.current = null;
       outRef.current = new ImageData(new Uint8ClampedArray(baseRGBA.current), w, h);
       const phasesGray = await pngToArray(maskUrl(jobId, "phases"), w, h);
       const talc = await pngToArray(maskUrl(jobId, "talc"), w, h);
@@ -130,6 +131,7 @@ export function Corrector({
     const mask = darkSegmentsMask(darkRef.current, state.phaseMap, state.talc, darkFrac / 100);
     const idxs: number[] = [];
     for (let i = 0; i < mask.length; i++) if (mask[i]) idxs.push(i);
+    if (idxs.length === 0) return;
     setState(applyTalc(state, idxs, true));
   }
 
