@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from app.shlif import analyze_image
 from app.shlif.features import extract_features
+from app.shlif.talc_unet import talc_unet_mask
 from app.shlif.uncertainty import ensemble_uncertainty, find_low_conf_zones
 from app.pipeline import masks, loader
 
@@ -31,8 +32,15 @@ def _uncertainty(rgb: np.ndarray, cfg) -> dict:
 
 
 def analyze_closeup(rgb: np.ndarray, cfg) -> dict:
-    """Classical/CPU path (GPU U-Net wiring is added later behind loader.gpu_available)."""
-    res = analyze_image(rgb, cfg, detect_talc_flag=True)  # classical talc seed
+    """Uses the trained talc U-Net when its weights are loadable (GPU or CPU);
+    falls back to the classical darkness-based talc seed when they aren't."""
+    unet = loader.load_talc_unet()
+    if unet is not None:
+        model, device = unet
+        talc_mask = talc_unet_mask(rgb, model, device, thr=None)
+        res = analyze_image(rgb, cfg, talc_mask=talc_mask)
+    else:
+        res = analyze_image(rgb, cfg, detect_talc_flag=True)  # classical talc seed
     m = res.masks
     phase_map = masks.phase_label_map(m["sulfide"], m["magnetite"])
 
