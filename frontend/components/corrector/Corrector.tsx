@@ -13,11 +13,14 @@ import {
   IconSave, IconUndo, IconRedo, IconZoomIn, IconZoomOut, IconReset, IconHand,
   IconBrush, IconEye, IconEyeOff,
 } from "@/components/icons";
+import { applyBrightness, applyClahe } from "@/lib/mask/enhance";
+import { darkSegmentsMask } from "@/lib/mask/darkpercent";
 
 const PHASE_RGB: Record<number, [number, number, number]> = { 1: [150, 160, 182], 2: [201, 180, 95] };
 const TALC_RGB: [number, number, number] = [79, 143, 240];
+const DARK_RGB: [number, number, number] = [200, 60, 220];
 const TOOLS: [Tool, string][] = [
-  ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["threshold", "Тёмные области"], ["pan", "Рука"],
+  ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["pan", "Рука"],
 ];
 type LayerDef = { key: Layer; ru: string; sw: string; overlay: "sulfide" | "magnetite" | "talc" | null };
 const LAYERS: LayerDef[] = [
@@ -51,6 +54,7 @@ export function Corrector({
   // Пиксельный конвейер: базовый снимок RGBA кэшируется один раз; композит наложения
   // считается инкрементально (только изменённые пиксели) и блитится раз в кадр (rAF).
   const baseRGBA = useRef<Uint8ClampedArray | null>(null);
+  const enhancedRGBA = useRef<Uint8ClampedArray | null>(null);
   const outRef = useRef<ImageData | null>(null);
   const srcRef = useRef<{ pm: Uint8Array; tc: Uint8Array } | null>(null);
   const strokeRef = useRef<{ pre: Snapshot; pm: Uint8Array; tc: Uint8Array; lx: number; ly: number } | null>(null);
@@ -58,11 +62,19 @@ export function Corrector({
   const pendingFull = useRef(false);
   const pendingIdx = useRef<number[]>([]);
   const [state, setState] = useState<CorrectorState | null>(null);
-  const [thr, setThr] = useState(60);
   const [saving, setSaving] = useState(false);
   const [vis, setVis] = useState<Vis>({ sulfide: true, magnetite: true, talc: true });
   const visRef = useRef(vis); visRef.current = vis;
+  const [maskAlpha, setMaskAlpha] = useState(0.5);
+  const maskAlphaRef = useRef(maskAlpha); maskAlphaRef.current = maskAlpha;
+  const [brightness, setBrightness] = useState(1.0);
+  const [clahe, setClahe] = useState(false);
+  const [darkFrac, setDarkFrac] = useState(45);
+  const [showDarkPreview, setShowDarkPreview] = useState(false);
+  const darkMaskRef = useRef<Uint8Array | null>(null);
+  const [spAction, setSpAction] = useState<"Ставить" | "Убирать">("Ставить");
   const [grabbing, setGrabbing] = useState(false);
+  const [sideTab, setSideTab] = useState<"edit" | "report">("edit");
   const zp = useZoomPan();
 
   useEffect(() => {
@@ -71,6 +83,7 @@ export function Corrector({
       const off = document.createElement("canvas"); off.width = w; off.height = h;
       const octx = off.getContext("2d")!; octx.drawImage(bmp, 0, 0, w, h);
       baseRGBA.current = octx.getImageData(0, 0, w, h).data;
+      enhancedRGBA.current = null;
       outRef.current = new ImageData(new Uint8ClampedArray(baseRGBA.current), w, h);
       const phasesGray = await pngToArray(maskUrl(jobId, "phases"), w, h);
       const talc = await pngToArray(maskUrl(jobId, "talc"), w, h);
@@ -91,18 +104,51 @@ export function Corrector({
       requestDraw();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.phaseMap, state?.talc, vis]);
+  }, [state?.phaseMap, state?.talc, vis, maskAlpha]);
+
+  // Яркость/CLAHE — приводим базовый снимок один раз в закэшированный буфер;
+  // composePixel всегда читает его вместо необработанного baseRGBA.
+  useEffect(() => {
+    if (!baseRGBA.current) return;
+    let buf = applyBrightness(baseRGBA.current, brightness);
+    if (clahe) buf = applyClahe(buf, w, h);
+    enhancedRGBA.current = buf;
+    if (state && !strokeRef.current) { srcRef.current = { pm: state.phaseMap, tc: state.talc }; requestDraw(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brightness, clahe]);
+
+  // Слой-подсказка «тёмные сегменты»: превью пересчитывается только пока включено;
+  // применение в маску — отдельная явная кнопка (applyDarkSegments), не автоматически.
+  useEffect(() => {
+    if (!state || !darkRef.current || !showDarkPreview) { darkMaskRef.current = null; requestDraw(); return; }
+    darkMaskRef.current = darkSegmentsMask(darkRef.current, state.phaseMap, state.talc, darkFrac / 100);
+    if (!strokeRef.current) { srcRef.current = { pm: state.phaseMap, tc: state.talc }; requestDraw(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [darkFrac, showDarkPreview, state?.phaseMap, state?.talc]);
+
+  function applyDarkSegments() {
+    if (!state || !darkRef.current) return;
+    const mask = darkSegmentsMask(darkRef.current, state.phaseMap, state.talc, darkFrac / 100);
+    const idxs: number[] = [];
+    for (let i = 0; i < mask.length; i++) if (mask[i]) idxs.push(i);
+    if (idxs.length === 0) return;
+    setState(applyTalc(state, idxs, true));
+  }
 
   function composePixel(pm: Uint8Array, tc: Uint8Array, i: number) {
-    const b = baseRGBA.current!, o = outRef.current!.data; const j = i * 4;
+    const b = (enhancedRGBA.current ?? baseRGBA.current)!, o = outRef.current!.data; const j = i * 4;
     let r = b[j], g = b[j + 1], bl = b[j + 2];
-    const cls = pm[i], v = visRef.current;
+    const cls = pm[i], v = visRef.current, a = maskAlphaRef.current;
     if ((cls === 2 && v.sulfide) || (cls === 1 && v.magnetite)) {
       const c = PHASE_RGB[cls];
-      r = 0.45 * r + 0.55 * c[0]; g = 0.45 * g + 0.55 * c[1]; bl = 0.45 * bl + 0.55 * c[2];
+      r = (1 - a) * r + a * c[0]; g = (1 - a) * g + a * c[1]; bl = (1 - a) * bl + a * c[2];
     }
     if (tc[i] && v.talc) {
-      r = 0.4 * r + 0.6 * TALC_RGB[0]; g = 0.4 * g + 0.6 * TALC_RGB[1]; bl = 0.4 * bl + 0.6 * TALC_RGB[2];
+      r = (1 - a) * r + a * TALC_RGB[0]; g = (1 - a) * g + a * TALC_RGB[1]; bl = (1 - a) * bl + a * TALC_RGB[2];
+    }
+    const dm = darkMaskRef.current;
+    if (dm && dm[i] && !tc[i]) {
+      r = 0.5 * r + 0.5 * DARK_RGB[0]; g = 0.5 * g + 0.5 * DARK_RGB[1]; bl = 0.5 * bl + 0.5 * DARK_RGB[2];
     }
     o[j] = r; o[j + 1] = g; o[j + 2] = bl; o[j + 3] = 255;
   }
@@ -148,7 +194,7 @@ export function Corrector({
   function moveCursor(e: React.PointerEvent) {
     const cd = cursorRef.current, vp = zp.vpRef.current, cv = canvasRef.current;
     if (!cd) return;
-    if (!vp || !cv || !state || (state.tool !== "brush" && state.tool !== "eraser")) { cd.style.display = "none"; return; }
+    if (!vp || !cv || !state || sideTab === "report" || (state.tool !== "brush" && state.tool !== "eraser")) { cd.style.display = "none"; return; }
     const vr = vp.getBoundingClientRect(), cr = cv.getBoundingClientRect();
     const d = state.brush * 2 * (cr.width / w);
     cd.style.display = "block";
@@ -160,7 +206,7 @@ export function Corrector({
     if ((e.target as Element).closest(".zoom-controls")) return; // клики по кнопкам зума не рисуют
     (e.target as Element).setPointerCapture?.(e.pointerId);
     if (!state) return;
-    if (e.button === 1 || state.tool === "pan") { setGrabbing(true); zp.startPan(e); return; }
+    if (sideTab === "report" || e.button === 1 || state.tool === "pan") { setGrabbing(true); zp.startPan(e); return; }
     const { cx, cy } = toCanvas(e);
     if (state.tool === "brush" || state.tool === "eraser") {
       const pre = snapshot(state);
@@ -171,11 +217,8 @@ export function Corrector({
       requestDraw(idxs);
     } else if (state.tool === "superpixel" && spRef.current) {
       const idxs = cellIndices(spRef.current, cy * w + cx);
-      setState(state.layer === "talc" ? applyTalc(state, idxs, true) : applyPhase(state, idxs, state.layer));
-    } else if (state.tool === "threshold" && darkRef.current) {
-      const idxs: number[] = [];
-      for (let i = 0; i < w * h; i++) if (darkRef.current[i] <= thr && state.phaseMap[i] === 0) idxs.push(i);
-      setState(applyTalc(state, idxs, true));
+      const setting = spAction === "Ставить";
+      setState(state.layer === "talc" ? applyTalc(state, idxs, setting) : applyPhase(state, idxs, setting ? state.layer : "matrix"));
     }
   }
 
@@ -213,13 +256,19 @@ export function Corrector({
     } finally { setSaving(false); }
   }
 
-  const vpClass = state?.tool === "pan" ? (grabbing ? "grabbing" : "grab")
+  const vpClass = sideTab === "report" || state?.tool === "pan" ? (grabbing ? "grabbing" : "grab")
     : (state?.tool === "brush" || state?.tool === "eraser") ? "paint" : "";
 
   return (
     <div className="workspace">
       <aside className="ws-side">
-        {info}
+        <div className="seg" role="group" aria-label="Раздел сайдбара">
+          <button type="button" className={sideTab === "edit" ? "active" : ""} aria-pressed={sideTab === "edit"}
+            onClick={() => setSideTab("edit")}>Редактирование</button>
+          <button type="button" className={sideTab === "report" ? "active" : ""} aria-pressed={sideTab === "report"}
+            onClick={() => setSideTab("report")}>Отчёт</button>
+        </div>
+        {sideTab === "report" ? info : (
         <div className="card">
           <div className="side-h">Редактор масок<span className="ann">{state ? `${state.brush}px` : "…"}</span></div>
           <div className="side-b">
@@ -238,21 +287,27 @@ export function Corrector({
                     ))}
                   </div>
                 </div>
-                <div className="tool-group">
-                  <span className="toolbar-label">Кисть</span>
-                  <label className="ctl">размер
-                    <input className="slider" type="range" min={2} max={60} value={state.brush}
-                      onChange={(e) => setState({ ...state, brush: +e.target.value })} />
-                    <span className="slider-val">{state.brush}px</span>
-                  </label>
-                  {state.tool === "threshold" && (
-                    <label className="ctl">порог
-                      <input className="slider" type="range" min={5} max={200} value={thr}
-                        onChange={(e) => setThr(+e.target.value)} />
-                      <span className="slider-val">{thr}</span>
+                {(state.tool === "brush" || state.tool === "eraser") && (
+                  <div className="tool-group">
+                    <span className="toolbar-label">Кисть</span>
+                    <label className="ctl">размер
+                      <input className="slider" type="range" min={2} max={60} value={state.brush}
+                        onChange={(e) => setState({ ...state, brush: +e.target.value })} />
+                      <span className="slider-val">{state.brush}px</span>
                     </label>
-                  )}
-                </div>
+                  </div>
+                )}
+                {state.tool === "superpixel" && (
+                  <div className="tool-group">
+                    <span className="toolbar-label">Клик по суперпикселю</span>
+                    <div className="seg" role="group" aria-label="Клик по суперпикселю">
+                      {(["Ставить", "Убирать"] as const).map((a) => (
+                        <button key={a} type="button" className={spAction === a ? "active" : ""} aria-pressed={spAction === a}
+                          onClick={() => setSpAction(a)}>{a}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="tool-group">
                   <span className="toolbar-label">Слои</span>
                   <div className="layers">
@@ -274,6 +329,38 @@ export function Corrector({
                     })}
                   </div>
                 </div>
+                <div className="tool-group">
+                  <span className="toolbar-label">Вид (не меняет маску)</span>
+                  <label className="ctl">прозрачность
+                    <input className="slider" type="range" min={0.10} max={0.90} step={0.05} value={maskAlpha}
+                      onChange={(e) => setMaskAlpha(+e.target.value)} />
+                    <span className="slider-val">{maskAlpha.toFixed(2)}</span>
+                  </label>
+                  <label className="ctl">яркость
+                    <input className="slider" type="range" min={0.40} max={2.60} step={0.1} value={brightness}
+                      onChange={(e) => setBrightness(+e.target.value)} />
+                    <span className="slider-val">{brightness.toFixed(1)}</span>
+                  </label>
+                  <label className="switch-row">
+                    <span>CLAHE (контраст)</span>
+                    <button type="button" className={`switch${clahe ? " on" : ""}`} role="switch" aria-checked={clahe}
+                      onClick={() => setClahe((v) => !v)}><span className="knob" /></button>
+                  </label>
+                </div>
+                <div className="tool-group">
+                  <span className="toolbar-label">Слои-подсказки (превью → применить в маску)</span>
+                  <label className="ctl">тёмные сегменты, % матрицы
+                    <input className="slider" type="range" min={10} max={70} step={5} value={darkFrac}
+                      onChange={(e) => setDarkFrac(+e.target.value)} />
+                    <span className="slider-val">{darkFrac}%</span>
+                  </label>
+                  <label className="switch-row">
+                    <span>Показать превью</span>
+                    <button type="button" className={`switch${showDarkPreview ? " on" : ""}`} role="switch" aria-checked={showDarkPreview}
+                      onClick={() => setShowDarkPreview((v) => !v)}><span className="knob" /></button>
+                  </label>
+                  <button type="button" className="btn ghost sm" onClick={applyDarkSegments}>+ Применить к тальку</button>
+                </div>
                 <div className="tool-group" style={{ display: "flex", gap: 8 }}>
                   <button type="button" className="btn ghost sm icon" title="Отменить" aria-label="Отменить"
                     onClick={() => setState(undo(state))}><IconUndo /></button>
@@ -287,6 +374,7 @@ export function Corrector({
             )}
           </div>
         </div>
+        )}
       </aside>
 
       <div className="ws-view">

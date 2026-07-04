@@ -1,4 +1,4 @@
-export type Tool = "superpixel" | "brush" | "eraser" | "threshold" | "pan";
+export type Tool = "superpixel" | "brush" | "eraser" | "pan";
 export type Layer = "matrix" | "magnetite" | "sulfide" | "talc";
 export interface Snapshot { phaseMap: Uint8Array; talc: Uint8Array; }
 export interface CorrectorState {
