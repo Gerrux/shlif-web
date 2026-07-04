@@ -10,7 +10,7 @@ import { Corrector } from "@/components/corrector/Corrector";
 import { Welcome } from "@/components/Welcome";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
-import { IconAlert, IconDownload } from "@/components/icons";
+import { IconAlert, IconDownload, IconUpload } from "@/components/icons";
 
 const STATUS: Record<string, [string, string]> = {
   queued: ["queued", "в очереди"], running: ["running", "анализ"],
@@ -56,6 +56,14 @@ function Home() {
     analyze.mutate({ file: f }, { onSuccess: (r) => setJobId(r.job_id) });
   }
 
+  function resetToUpload() {
+    analyze.reset();
+    setFile(null);
+    setJobId(null);
+    setStartedAt(null);
+    setVOverride(null);
+  }
+
   const result = job.data?.status === "done" ? job.data.result : null;
   const shown = result && vOverride ? { ...result, verdict: vOverride } : result;
   const started = !!jobId || analyze.isPending;
@@ -97,6 +105,9 @@ function Home() {
         {badgeKey && STATUS[badgeKey] ? (
           <span className={`status-badge ${STATUS[badgeKey][0]}`}><span className="bd" />{STATUS[badgeKey][1]}</span>
         ) : null}
+        <button type="button" className="btn ghost sm" onClick={resetToUpload}>
+          <IconUpload className="ico-sm" /> Новый анализ
+        </button>
         <ThemeToggle />
       </header>
 
