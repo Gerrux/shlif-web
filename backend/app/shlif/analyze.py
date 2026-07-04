@@ -15,7 +15,7 @@ import numpy as np
 from . import phases
 from .preprocess import preprocess
 from .segment import segment_phases
-from .talc import detect_talc, talc_fraction
+from .talc import dark_gray_phase, detect_talc, talc_fraction
 
 
 @dataclass
@@ -125,11 +125,20 @@ def analyze_image(rgb: np.ndarray, cfg, dist_px: int = 12, detect_talc_flag: boo
         talc = np.zeros(rgb.shape[:2], dtype=bool)
     v = verdict_from_masks(sulfide, magnetite, matrix, talc, cfg, dist_px)
     ore, text, metrics, normal, fine = v["ore_class"], v["text"], v["metrics"], v["normal"], v["fine"]
+
+    # Independent talc-share proxy: dispersed medium-dark grey phase inside the
+    # matrix. A robust second opinion on the talc share, reported alongside the
+    # segmenter-driven talc_frac (borrowed heuristic; see talc.dark_gray_phase).
+    dg, _ = dark_gray_phase(rgb, cfg.talc)
+    dg = dg & matrix
+    metrics["talc_share_est"] = float(dg.mean())
+
     masks = {
         "sulfide": sulfide,
         "magnetite": magnetite,
         "matrix": matrix,
         "talc": talc,
+        "talc_dispersed": dg,
         "normal": normal,
         "fine": fine,
         "preprocessed": pre,
