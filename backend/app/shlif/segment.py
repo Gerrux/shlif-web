@@ -31,9 +31,17 @@ class SegResult:
     fractions: dict               # area fractions of each phase (of total image)
 
 
-def _levels(L: np.ndarray, bright_pct: float) -> tuple[float, float]:
+def compute_levels(L: np.ndarray, bright_pct: float) -> tuple[float, float]:
     """Two thresholds (dark|mid, mid|bright) from a 3-class Otsu on L, with a
-    robust fallback for low-variance (near-empty) tiles."""
+    robust fallback for low-variance (near-empty) tiles.
+
+    Exposed publicly so callers that segment many crops of one scene (e.g. the
+    panorama tiler) can compute this once on a representative reference and
+    pass it to every :func:`segment_phases` call via ``levels=``. A 3-class
+    Otsu re-fit on a single small tile can't tell "no real mid/bright phase
+    here" from "here is the mid/bright phase" -- it always forces a split out
+    of whatever variance the tile happens to contain, so a matrix-only tile's
+    own texture noise gets carved into fake magnetite/sulfide bands."""
     finite = L[np.isfinite(L)]
     if finite.size == 0 or np.ptp(finite) < 1.0:
         hi = np.percentile(finite, bright_pct) if finite.size else 1e9
@@ -70,15 +78,18 @@ def _drop_small(m: np.ndarray, min_area: int) -> np.ndarray:
     return keep[lbl].astype(np.uint8)
 
 
-def segment_phases(rgb: np.ndarray, cfg) -> SegResult:
-    """Segment sulfide / magnetite / matrix from a preprocessed RGB image."""
+def segment_phases(rgb: np.ndarray, cfg, levels: tuple[float, float] | None = None) -> SegResult:
+    """Segment sulfide / magnetite / matrix from a preprocessed RGB image.
+
+    ``levels``, when given, overrides the per-call Otsu split with a caller-
+    supplied ``(dark_t, bright_t)`` pair -- see :func:`compute_levels`."""
     lab = rgb2lab(rgb)
     L = lab[..., 0]
     a = lab[..., 1]
     b = lab[..., 2]
     chroma = np.sqrt(a * a + b * b)
 
-    dark_t, bright_t = _levels(L, float(cfg.bright_percentile))
+    dark_t, bright_t = levels if levels is not None else compute_levels(L, float(cfg.bright_percentile))
 
     # sulfide: brightest band, above an absolute floor
     sulfide = (L >= bright_t) & (L >= float(cfg.sulfide_min_L))
