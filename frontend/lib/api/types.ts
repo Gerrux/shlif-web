@@ -19,4 +19,5 @@ export interface AnalyzeResult {
 export interface Job {
   id: string; mode: string; status: "queued" | "running" | "done" | "error";
   progress: number; message: string | null; result: AnalyzeResult | null;
+  batch_id: string | null; filename: string | null; created_at: string | null;
 }
