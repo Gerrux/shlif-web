@@ -52,3 +52,30 @@ def test_analyze_result_includes_reproducibility_params(tiny_rgb):
     assert params["mode"] == "closeup"
     assert "models" in params
     assert "gpu" in params
+
+
+def test_list_jobs_by_batch_returns_all_members(tiny_rgb):
+    c = TestClient(app)
+    jids = []
+    for name in ("one.png", "two.png"):
+        r = c.post("/api/analyze", data={"batch_id": "batch-list"},
+                   files={"image": (name, _png_bytes(tiny_rgb), "image/png")})
+        jids.append(r.json()["job_id"])
+    for jid in jids:
+        _poll(c, jid)
+    listed = c.get("/api/jobs", params={"batch_id": "batch-list"}).json()
+    assert sorted(j["id"] for j in listed) == sorted(jids)
+    assert {j["filename"] for j in listed} == {"one.png", "two.png"}
+
+
+def test_list_jobs_requires_batch_id_query_param():
+    c = TestClient(app)
+    r = c.get("/api/jobs")
+    assert r.status_code == 422
+
+
+def test_list_jobs_empty_for_unknown_batch():
+    c = TestClient(app)
+    r = c.get("/api/jobs", params={"batch_id": "does-not-exist"})
+    assert r.status_code == 200
+    assert r.json() == []
