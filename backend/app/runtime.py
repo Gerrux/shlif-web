@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from app.core import paths
 
 class Runtime:
@@ -7,7 +8,8 @@ class Runtime:
         from app.jobs.store import JobStore
         from app.jobs.runner import JobRunner
         self.store = JobStore(paths.db_path())
-        self.runner = JobRunner(self.store, max_workers=2)
+        workers = int(os.environ.get("SHLIF_JOB_WORKERS", "4"))
+        self.runner = JobRunner(self.store, max_workers=workers)
 
 _runtime: Runtime | None = None
 
