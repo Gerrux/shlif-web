@@ -10,6 +10,9 @@ from app.runtime import get_runtime
 router = APIRouter()
 Image.MAX_IMAGE_PIXELS = None
 
+def _analysis_params(mode: str) -> dict:
+    return {"mode": mode, "models": loader.model_status(), "gpu": loader.gpu_available()}
+
 @router.post("/analyze")
 async def analyze(image: UploadFile = File(...), batch_id: str | None = Form(None)):
     data = await image.read()
@@ -22,7 +25,9 @@ async def analyze(image: UploadFile = File(...), batch_id: str | None = Form(Non
 
     def work(report):
         if mode == "panorama":
-            return panorama.analyze_panorama(str(up), cfg, jid, on_progress=report)
+            result = panorama.analyze_panorama(str(up), cfg, jid, on_progress=report)
+            result["params"] = _analysis_params(mode)
+            return result
         report(0.05, "загрузка изображения")
         im = Image.open(io.BytesIO(data)).convert("RGB")
         im.thumbnail((masks.EDIT_MAX_SIDE, masks.EDIT_MAX_SIDE))
@@ -35,7 +40,8 @@ async def analyze(image: UploadFile = File(...), batch_id: str | None = Form(Non
         h, w = rgb.shape[:2]
         return {"mode": "closeup", "verdict": r["verdict"], "sort": r["sort"],
                 "text": r["text"], "size": [w, h],
-                "low_conf_zones": r["low_conf_zones"]}
+                "low_conf_zones": r["low_conf_zones"],
+                "params": _analysis_params(mode)}
 
     get_runtime().runner.submit(jid, work)
     return {"job_id": jid}

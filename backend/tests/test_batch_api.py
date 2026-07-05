@@ -41,3 +41,14 @@ def test_analyze_without_batch_id_leaves_it_null(tiny_rgb):
     done = _poll(c, jid)
     assert done["batch_id"] is None
     assert done["filename"] == "solo.png"
+
+
+def test_analyze_result_includes_reproducibility_params(tiny_rgb):
+    c = TestClient(app)
+    up = c.post("/api/analyze", files={"image": ("p.png", _png_bytes(tiny_rgb), "image/png")})
+    jid = up.json()["job_id"]
+    done = _poll(c, jid)
+    params = done["result"]["params"]
+    assert params["mode"] == "closeup"
+    assert "models" in params
+    assert "gpu" in params
