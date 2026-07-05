@@ -5,7 +5,7 @@ Method (all thresholds adaptive per image, tunable via config):
   * Sulfide is the *brightest* phase in both bright close-ups and dark panoramas
     -> take the top band of a 3-level Otsu on L.
   * Magnetite is mid-reflectance and *neutral* (low chroma) -> mid L band with
-    small chroma, excluding the olive (green-warm) matrix by its chroma/hue.
+    small chroma. No hue/warmth gate (see segment_phases for why).
   * Everything else is matrix.
 
 Returns an integer label map using the constants in :mod:`shlif.phases`.
@@ -83,13 +83,16 @@ def segment_phases(rgb: np.ndarray, cfg) -> SegResult:
     # sulfide: brightest band, above an absolute floor
     sulfide = (L >= bright_t) & (L >= float(cfg.sulfide_min_L))
 
-    # magnetite: mid reflectance, neutral (low chroma), and not the olive matrix.
-    # olive/gangue is green-yellow -> excluded by requiring low chroma AND b above
-    # a small floor (so we don't pick strongly-coloured matrix as "grey").
+    # magnetite: mid reflectance, neutral (low chroma). No hue/warmth gate --
+    # a `not_olive` filter here used to assume olive hue = matrix, but that's
+    # backwards for this material (olive = sulfide; real magnetite skews cool,
+    # negative Lab b) and an absolute b-channel floor doesn't transfer across
+    # images with different lighting/white-balance anyway. Genuinely ambiguous
+    # magnetite/sulfide pixels are caught by uncertainty.py's perturbation
+    # ensemble instead of forced here.
     mid = (L >= dark_t) & ~sulfide
     neutral = chroma <= float(cfg.chroma_max)
-    not_olive = b >= float(cfg.green_b_min)
-    magnetite = mid & neutral & not_olive
+    magnetite = mid & neutral
 
     min_area = int(cfg.min_ore_area_px)
     close_r = int(cfg.close_radius)

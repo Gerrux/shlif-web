@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.shlif.classify import Dataset, build_dataset, cross_validate, train_full
+from app.shlif.classify import build_dataset, cross_validate, train_full
 from app.shlif.config import load_config
 from app.shlif.imageio import list_class_images
 
