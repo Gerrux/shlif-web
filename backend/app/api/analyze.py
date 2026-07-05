@@ -1,7 +1,7 @@
 from __future__ import annotations
 import io, numpy as np
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
 from app.pipeline import closeup, panorama, loader, masks, detect
 from app.core import paths
@@ -11,12 +11,12 @@ router = APIRouter()
 Image.MAX_IMAGE_PIXELS = None
 
 @router.post("/analyze")
-async def analyze(image: UploadFile = File(...)):
+async def analyze(image: UploadFile = File(...), batch_id: str | None = Form(None)):
     data = await image.read()
     cfg = loader.get_config()
     iw, ih = Image.open(io.BytesIO(data)).size
     mode = detect.detect_mode(iw, ih, cfg)
-    jid = get_runtime().store.create(mode)
+    jid = get_runtime().store.create(mode, batch_id=batch_id, filename=image.filename)
     up = paths.uploads_dir() / f"{jid}_{Path(image.filename or 'up').name}"
     up.write_bytes(data)
 
