@@ -1,5 +1,6 @@
 import io
 import time
+import uuid
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -56,14 +57,15 @@ def test_analyze_result_includes_reproducibility_params(tiny_rgb):
 
 def test_list_jobs_by_batch_returns_all_members(tiny_rgb):
     c = TestClient(app)
+    batch_id = uuid.uuid4().hex
     jids = []
     for name in ("one.png", "two.png"):
-        r = c.post("/api/analyze", data={"batch_id": "batch-list"},
+        r = c.post("/api/analyze", data={"batch_id": batch_id},
                    files={"image": (name, _png_bytes(tiny_rgb), "image/png")})
         jids.append(r.json()["job_id"])
     for jid in jids:
         _poll(c, jid)
-    listed = c.get("/api/jobs", params={"batch_id": "batch-list"}).json()
+    listed = c.get("/api/jobs", params={"batch_id": batch_id}).json()
     assert sorted(j["id"] for j in listed) == sorted(jids)
     assert {j["filename"] for j in listed} == {"one.png", "two.png"}
 
