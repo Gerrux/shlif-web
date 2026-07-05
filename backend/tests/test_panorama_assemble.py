@@ -4,11 +4,17 @@ exactly one phase (no gap from the last-tile edge, no double count from
 the overlap band)."""
 import copy
 
+import cv2
 import numpy as np
 from PIL import Image
+from scipy.ndimage import gaussian_filter
+from skimage.color import rgb2lab
 
 from app.pipeline import loader, panorama
+from app.pipeline.masks import EDIT_MAX_SIDE, fit_max_side
 from app.shlif.imageio import load_rgb
+from app.shlif.preprocess import preprocess
+from app.shlif.segment import compute_levels
 
 
 def _synthetic_section():
@@ -77,3 +83,54 @@ def test_assemble_masks_partitions_every_pixel_exactly_once(tmp_path):
     # the seeded mid-grey blob (which straddles a y-tile boundary) must
     # still be picked up as magnetite, not lost at the seam
     assert assembled["magnetite"][800:1000, 1000:1200].mean() > 0.5
+
+
+def _textured_gray(seed, base, amp, sigma, size):
+    """Spatially-correlated (not white-noise) grey patch, standing in for real
+    rock texture: grainy but locally smooth, unlike iid-per-pixel randint."""
+    rng = np.random.default_rng(seed)
+    noise = gaussian_filter(rng.normal(0, 1, size).astype(np.float32), sigma=sigma)
+    noise = noise / (np.abs(noise).max() + 1e-6) * amp
+    gray = np.clip(base + noise, 0, 255)
+    jitter = np.random.default_rng(seed + 100).normal(0, 1.5, size + (3,)).astype(np.float32)
+    return np.clip(gray[..., None] + jitter, 0, 255).astype(np.uint8)
+
+
+def test_assemble_masks_with_anchor_keeps_ore_free_tiles_matrix(tmp_path):
+    """Regression for "everything paints as magnetite on the panorama": a
+    section that is mostly textured matrix, with one genuine ore patch tucked
+    in a corner, tiled at 2048px (analyze_panorama's forced tile size). Without
+    an anchor, each matrix-only tile refits its own 3-class Otsu on nothing but
+    its own texture noise and reads a big chunk of itself as magnetite/sulfide
+    (see test_segment.py). Anchoring `levels` to a section-wide reference (as
+    analyze_panorama now does) must keep those tiles matrix -- and this must
+    hold with CLAHE left ON in cfg.preprocess (the default), since per-tile
+    CLAHE independently re-stretches each tile's contrast and would otherwise
+    defeat the anchor (see `panorama._segmentation_preprocess_cfg`)."""
+    H, W = 2400, 3000
+    img = _textured_gray(1, base=45, amp=15, sigma=4, size=(H, W))
+    img[300:900, 300:1200] = _textured_gray(9, base=170, amp=15, sigma=4, size=(600, 900))
+    img[300:500, 300:1200] = _textured_gray(10, base=225, amp=10, sigma=4, size=(200, 900))
+    p = tmp_path / "mixed_section.jpg"
+    Image.fromarray(img).save(p, "JPEG", quality=95)
+
+    cfg = copy.deepcopy(loader.get_config())
+    cfg.tiling.tile = 2048
+    assert cfg.preprocess.clahe  # the scenario this guards against needs CLAHE on
+
+    arr = load_rgb(str(p), max_pixels=int(cfg.tiling.max_pixels))
+    anchor_rgb = fit_max_side(arr, EDIT_MAX_SIDE, cv2.INTER_AREA)
+    seg_pre_cfg = panorama._segmentation_preprocess_cfg(cfg)
+    anchor_L = rgb2lab(preprocess(anchor_rgb, seg_pre_cfg))[..., 0]
+    levels = compute_levels(anchor_L, float(cfg.segment.bright_percentile))
+
+    assembled = panorama._assemble_masks(str(p), cfg, arr, levels=levels)
+
+    # far from the ore patch (a different 2048px tile, entirely matrix): must
+    # stay matrix, not fabricate magnetite/sulfide out of the tile's own
+    # texture noise
+    far = assembled["magnetite"][2050:2350, 2200:2900] | assembled["sulfide"][2050:2350, 2200:2900]
+    assert far.mean() < 0.05
+
+    # the real ore patch itself must still be picked up
+    assert assembled["magnetite"][300:900, 300:1200].mean() > 0.3

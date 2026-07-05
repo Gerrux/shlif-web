@@ -34,11 +34,12 @@ import time
 import cv2
 import numpy as np
 from PIL import Image
+from skimage.color import rgb2lab
 
 from app.shlif import load_config, phases  # noqa: F401 (load_config kept for parity)
 from app.shlif.features import extract_features
 from app.shlif.preprocess import preprocess
-from app.shlif.segment import segment_phases
+from app.shlif.segment import compute_levels, segment_phases
 from app.shlif.talc import dark_gray_phase, detect_talc
 from app.shlif.ore_unet import ore_unet_mask
 from app.shlif.tiling import axis_core_bounds, count_tiles, iter_tiles, load_working_array, tile_grid
@@ -48,6 +49,18 @@ from app.core import paths
 
 ORE_DENSITY_PCT = 92.0  # global brightness percentile that separates ore flecks from silicate
 _UNC_MAX_SIDE = 1024  # cap the ensemble-uncertainty resolution per tile (mirrors closeup.py)
+
+
+def _segmentation_preprocess_cfg(cfg) -> dict:
+    """Preprocessing for segment_phases's input only: white-balance + denoise,
+    WITHOUT CLAHE. CLAHE's local contrast stretch independently re-scales each
+    tile's own brightness range, which defeats a shared `levels` anchor -- a
+    matrix-only tile's own texture noise gets stretched past the anchor's
+    dark_t even though its raw reflectance never approaches real ore (see the
+    `seg_levels` comment in analyze_panorama). Talc detection and feature
+    extraction keep the normal (CLAHE'd) preprocessing; only the phase
+    decision needs this."""
+    return {**cfg.preprocess, "clahe": False}
 
 
 def ore_density(gray: np.ndarray, bright_thr: float) -> float:
@@ -71,14 +84,18 @@ def aggregate_section(records, classes) -> np.ndarray:
     return (P * W[:, None]).sum(0) / W.sum()
 
 
-def _assemble_masks(path: str, cfg, arr: np.ndarray, on_progress=None) -> dict:
+def _assemble_masks(path: str, cfg, arr: np.ndarray,
+                    levels: tuple[float, float] | None = None, on_progress=None) -> dict:
     """Tile the section, segment + talc-detect each tile, and reassemble one
     continuous mask set for the whole working canvas — core-crop (no overlap
     double count, see `axis_core_bounds`) — so `verdict_from_masks` sees the
     same kind of input it gets from a single close-up pass. Classical
-    segmentation only (see module docstring). `on_progress(progress, message)`,
-    if given, is called once per tile, scaled into the 0.05-0.35 job-progress
-    range (this is the first of panorama's two tile loops)."""
+    segmentation only (see module docstring). `levels`, when given, anchors
+    every tile's `segment_phases` call to one dark/bright split for the whole
+    section instead of letting each tile refit its own 3-class Otsu — see
+    `compute_levels` for why a matrix-only tile needs this. `on_progress(progress,
+    message)`, if given, is called once per tile, scaled into the 0.05-0.35
+    job-progress range (this is the first of panorama's two tile loops)."""
     H, W = arr.shape[:2]
     sulfide = np.zeros((H, W), bool)
     magnetite = np.zeros((H, W), bool)
@@ -90,6 +107,7 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray, on_progress=None) -> dict:
     x_core_end = axis_core_bounds(W, tile_px, step)
     y_core_end = axis_core_bounds(H, tile_px, step)
     total = max(1, count_tiles(path, cfg.tiling))
+    seg_pre_cfg = _segmentation_preprocess_cfg(cfg)
     n = 0
 
     for tile in iter_tiles(path, cfg.tiling, arr=arr):
@@ -107,7 +125,8 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray, on_progress=None) -> dict:
             continue
 
         pre = preprocess(tile.rgb, cfg.preprocess)
-        seg = segment_phases(pre, cfg.segment)
+        seg_pre = preprocess(tile.rgb, seg_pre_cfg)
+        seg = segment_phases(seg_pre, cfg.segment, levels=levels)
         tk = detect_talc(pre, seg.labels == phases.MATRIX, cfg.talc)
         dgm, _ = dark_gray_phase(tile.rgb, cfg.talc)
 
@@ -120,13 +139,15 @@ def _assemble_masks(path: str, cfg, arr: np.ndarray, on_progress=None) -> dict:
     return {"sulfide": sulfide, "magnetite": magnetite, "matrix": matrix, "talc": talc, "dg": dg}
 
 
-def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore: float = 0.04,
+def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray,
+                  levels: tuple[float, float] | None = None, min_ore: float = 0.04,
                   on_progress=None) -> dict:
     """Tile a panorama, classify ore-rich tiles for the `sort` card (ore-density
     weighted aggregation — unchanged mechanism, see design spec §4.2), and
     estimate per-tile ensemble uncertainty. Matrix segmentation uses the
     trained ore/matrix U-Net when available (IoU 0.975 vs classical 0.81),
-    falling back to classical segmentation otherwise. The whole-image
+    falling back to classical segmentation otherwise -- `levels`, when given,
+    anchors that classical fallback the same way `_assemble_masks` does. The whole-image
     phase/talc masks and the `ore_class` verdict come from `_assemble_masks` +
     `verdict_from_masks` instead (design spec §4.1) — this function no longer
     decides ore_class, and no longer builds a tile-painted display overlay
@@ -151,6 +172,7 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
     n_tiles = n_ore = n_matrix = 0
     t0 = time.time()
     total_tiles_est = max(1, count_tiles(path, cfg.tiling))
+    seg_pre_cfg = _segmentation_preprocess_cfg(cfg)
 
     for tile in iter_tiles(path, cfg.tiling, arr=arr):
         n_tiles += 1
@@ -160,12 +182,12 @@ def _run_panorama(path, clf, feat_names, classes, cfg, arr: np.ndarray, min_ore:
         if tile.empty:
             continue
         rgb = tile.rgb
-        pre = preprocess(rgb, cfg.preprocess)
         if ore_bundle is not None:
             ore_model, ore_device = ore_bundle
             matrix = ~ore_unet_mask(rgb, ore_model, ore_device)
         else:
-            matrix = segment_phases(pre, cfg.segment).labels == phases.MATRIX
+            seg_pre = preprocess(rgb, seg_pre_cfg)
+            matrix = segment_phases(seg_pre, cfg.segment, levels=levels).labels == phases.MATRIX
         ore_px = int((~matrix).sum())
         ore_frac = ore_px / max(matrix.size, 1)
 
@@ -231,14 +253,27 @@ def analyze_panorama(path: str, cfg, jid: str, on_progress=None) -> dict:
     arr = load_working_array(path, cfg.tiling)
     H, W = arr.shape[:2]
 
-    assembled = _assemble_masks(path, cfg, arr, on_progress=on_progress)
+    # Anchor segment_phases's dark/bright split once for the whole section
+    # instead of letting each 2048px tile refit its own 3-class Otsu: a tile
+    # that is entirely matrix has no genuine trimodal brightness distribution,
+    # so a per-tile Otsu invents a false mid/bright split out of the tile's own
+    # texture noise and paints matrix as magnetite/sulfide. A downscaled,
+    # section-wide reference is enough to fit a stable split cheaply. Uses the
+    # same CLAHE-free preprocessing the tiles' segmentation input gets (see
+    # `_segmentation_preprocess_cfg`), or the anchor and the per-tile values it
+    # is compared against would be calibrated differently.
+    anchor_rgb = masks.fit_max_side(arr, masks.EDIT_MAX_SIDE, cv2.INTER_AREA)
+    anchor_L = rgb2lab(preprocess(anchor_rgb, _segmentation_preprocess_cfg(cfg)))[..., 0]
+    seg_levels = compute_levels(anchor_L, float(cfg.segment.bright_percentile))
+
+    assembled = _assemble_masks(path, cfg, arr, levels=seg_levels, on_progress=on_progress)
     report(0.35, "вердикт по фазам")
     verdict = masks.verdict_from_masks_dict(
         assembled["sulfide"], assembled["magnetite"], assembled["matrix"], assembled["talc"], cfg)
     intergrowth = verdict.pop("intergrowth")
     verdict["metrics"]["talc_share_est"] = float(assembled["dg"].mean())
 
-    run = _run_panorama(path, clf, feat, classes, cfg, arr, on_progress=on_progress)
+    run = _run_panorama(path, clf, feat, classes, cfg, arr, levels=seg_levels, on_progress=on_progress)
     verdict["metrics"]["undetermined_fraction"] = run["undetermined_fraction"]
     report(0.85, "сохранение изображения")
     Image.fromarray(run["edit_rgb"]).save(paths.images_dir() / f"{jid}.jpg", "JPEG", quality=88)
