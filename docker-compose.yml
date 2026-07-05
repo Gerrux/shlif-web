@@ -1,6 +1,7 @@
 services:
   traefik:
     image: traefik:v3.2
+    restart: unless-stopped
     command:
       - "--configFile=/etc/traefik/traefik.yml"
     ports:
@@ -13,6 +14,7 @@ services:
 
   api:
     build: ./backend
+    restart: unless-stopped
     environment:
       - SHLIF_DATA_DIR=/app/data
       - SHLIF_MODELS_DIR=/app/models
@@ -39,6 +41,7 @@ services:
 
   web:
     build: ./frontend
+    restart: unless-stopped
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.web.rule=PathPrefix(`/`)"
