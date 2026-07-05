@@ -67,6 +67,12 @@ export const IconReset = ({ className }: { className?: string }) => (
 export const IconBrush = ({ className }: { className?: string }) => (
   <Icon className={className}><path d="M9.06 11.9 3.6 17.4a2.05 2.05 0 0 0 2.9 2.9l5.5-5.46" /><path d="M14 14 21 7a2.1 2.1 0 0 0-3-3l-7 7" /></Icon>
 );
+export const IconEraser = ({ className }: { className?: string }) => (
+  <Icon className={className}><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4L13 4a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3L11 22M22 21H7" /></Icon>
+);
+export const IconGrid = ({ className }: { className?: string }) => (
+  <Icon className={className}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></Icon>
+);
 export const IconTelegram = ({ className }: { className?: string }) => (
   <Icon className={className}><path d="m21 4-2.6 15.2a1.2 1.2 0 0 1-1.86.8l-4.6-3.4-2.4 2.3a.8.8 0 0 1-1.35-.5l.4-4.1L18.5 6.3a.4.4 0 0 0-.5-.6L7.3 12.4 3.4 11.1a.7.7 0 0 1-.02-1.3L20.2 3.2a.7.7 0 0 1 .8.8z" /></Icon>
 );

@@ -11,7 +11,7 @@ import type { Verdict } from "@/lib/api/types";
 import { useZoomPan } from "@/lib/useZoomPan";
 import {
   IconSave, IconUndo, IconRedo, IconZoomIn, IconZoomOut, IconReset, IconHand,
-  IconBrush, IconEye, IconEyeOff,
+  IconBrush, IconEraser, IconGrid, IconEye, IconEyeOff,
 } from "@/components/icons";
 import { applyBrightness, applyClahe } from "@/lib/mask/enhance";
 import { darkSegmentsMask } from "@/lib/mask/darkpercent";
@@ -21,9 +21,13 @@ const TALC_RGB: [number, number, number] = [79, 143, 240];
 const DARK_RGB: [number, number, number] = [200, 60, 220];
 const NORMAL_RGB: [number, number, number] = [63, 174, 107];
 const FINE_RGB: [number, number, number] = [224, 85, 78];
-const TOOLS: [Tool, string][] = [
-  ["brush", "Кисть"], ["eraser", "Ластик"], ["superpixel", "Суперпиксель"], ["pan", "Рука"],
+const TOOLS: { tool: Tool; ru: string; key: string; Icon: typeof IconBrush }[] = [
+  { tool: "brush", ru: "Кисть", key: "B", Icon: IconBrush },
+  { tool: "eraser", ru: "Ластик", key: "E", Icon: IconEraser },
+  { tool: "superpixel", ru: "Суперпиксель", key: "S", Icon: IconGrid },
+  { tool: "pan", ru: "Рука", key: "H", Icon: IconHand },
 ];
+const BRUSH_PRESETS = [4, 12, 32];
 type LayerDef = { key: Layer; ru: string; sw: string; overlay: "sulfide" | "magnetite" | "talc" | null };
 const LAYERS: LayerDef[] = [
   { key: "sulfide", ru: "сульфид", sw: "rgb(201,180,95)", overlay: "sulfide" },
@@ -140,6 +144,22 @@ export function Corrector({
     if (!strokeRef.current) { srcRef.current = { pm: state.phaseMap, tc: state.talc }; requestDraw(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [darkFrac, showDarkPreview, state?.phaseMap, state?.talc]);
+
+  // Горячие клавиши инструментов (B/E/S/H) — только на вкладке «Редактирование»,
+  // без модификаторов, вне текстовых полей.
+  useEffect(() => {
+    const KEY_TOOL: Record<string, Tool> = { b: "brush", e: "eraser", s: "superpixel", h: "pan" };
+    function onKeyDown(e: KeyboardEvent) {
+      if (sideTabRef.current !== "edit" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (/^(input|textarea)$/i.test(target.tagName) || target.isContentEditable)) return;
+      const tool = KEY_TOOL[e.key.toLowerCase()];
+      if (!tool) return;
+      setState((s) => (s ? { ...s, tool } : s));
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   function applyDarkSegments() {
     if (!state || !darkRef.current) return;
@@ -312,23 +332,31 @@ export function Corrector({
               <>
                 <div className="tool-group">
                   <span className="toolbar-label">Инструмент</span>
-                  <div className="seg" role="group" aria-label="Инструмент">
-                    {TOOLS.map(([t, ru]) => (
-                      <button key={t} type="button" className={state.tool === t ? "active" : ""}
-                        aria-pressed={state.tool === t} onClick={() => setState({ ...state, tool: t })}>
-                        {t === "brush" ? <IconBrush className="ico-sm" /> : t === "pan" ? <IconHand className="ico-sm" /> : null}{ru}
+                  <div className="tool-tiles" role="group" aria-label="Инструмент">
+                    {TOOLS.map(({ tool, ru, key, Icon }) => (
+                      <button key={tool} type="button" className={`tool-tile${state.tool === tool ? " active" : ""}`}
+                        aria-pressed={state.tool === tool} onClick={() => setState({ ...state, tool })}>
+                        <kbd>{key}</kbd>
+                        <Icon className="ico-sm" />
+                        <span>{ru}</span>
                       </button>
                     ))}
                   </div>
                 </div>
                 {(state.tool === "brush" || state.tool === "eraser") && (
                   <div className="tool-group">
-                    <span className="toolbar-label">Кисть</span>
-                    <label className="ctl">размер
-                      <input className="slider" type="range" min={2} max={60} value={state.brush}
-                        onChange={(e) => setState({ ...state, brush: +e.target.value })} />
+                    <div className="brush-head">
+                      <span className="toolbar-label">Размер кисти</span>
                       <span className="slider-val">{state.brush}px</span>
-                    </label>
+                    </div>
+                    <input className="slider wide" type="range" min={2} max={60} value={state.brush}
+                      onChange={(e) => setState({ ...state, brush: +e.target.value })} />
+                    <div className="brush-presets">
+                      {BRUSH_PRESETS.map((v) => (
+                        <button key={v} type="button" className={`brush-preset${state.brush === v ? " active" : ""}`}
+                          onClick={() => setState({ ...state, brush: v })}>{v}</button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {state.tool === "superpixel" && (
