@@ -11,3 +11,6 @@ class JobRecord(BaseModel):
     progress: float = 0.0
     message: Optional[str] = None
     result: Optional[dict[str, Any]] = None
+    batch_id: Optional[str] = None
+    filename: Optional[str] = None
+    created_at: Optional[str] = None

@@ -10,18 +10,18 @@ const TEAM = [
   { name: "Никита", url: "https://t.me/sngflu" },
 ];
 
-export function Welcome({ onFile }: { onFile: (f: File) => void }) {
+export function Welcome({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [drag, setDrag] = useState(false);
 
   function pickFromInput(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) onFile(f);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length) onFiles(files);
   }
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDrag(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f && f.type.startsWith("image/")) onFile(f);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+    if (files.length) onFiles(files);
   }
 
   return (
@@ -48,8 +48,8 @@ export function Welcome({ onFile }: { onFile: (f: File) => void }) {
         >
           <IconUpload className="ico-lg dz-ico" />
           <span className="dz-title">Перетащите снимок шлифа сюда</span>
-          <span className="dz-sub">или нажмите, чтобы выбрать · JPG / PNG · OM, отражённый свет</span>
-          <input type="file" accept="image/*" onChange={pickFromInput} style={{ display: "none" }} />
+          <span className="dz-sub">или нажмите, чтобы выбрать (можно сразу несколько) · JPG / PNG · OM, отражённый свет</span>
+          <input type="file" accept="image/*" multiple onChange={pickFromInput} style={{ display: "none" }} />
         </label>
       </div>
       <div className="welcome-credits">
