@@ -6,10 +6,11 @@ import { imageUrl } from "@/lib/api/client";
 import { IconDownload, IconUpload } from "@/components/icons";
 
 export function BatchGallery({
-  batchId, jobs, onOpen, onNewAnalysis,
+  batchId, jobs, uploadsSettled, onOpen, onNewAnalysis,
 }: {
   batchId: string;
   jobs: Job[];
+  uploadsSettled: boolean;
   onOpen: (jobId: string) => void;
   onNewAnalysis: () => void;
 }) {
@@ -36,7 +37,10 @@ export function BatchGallery({
         </button>
       </div>
       {jobs.length === 0 ? (
-        <div className="stage-empty"><div className="hint">Загрузка файлов…</div></div>
+        <div className="stage-empty">
+          <div className="hint">{uploadsSettled ? "Ни один файл не загружен" : "Загрузка файлов…"}</div>
+          {uploadsSettled ? <div className="sub">Подробности — в списке ошибок ниже</div> : null}
+        </div>
       ) : (
         <div className="batch-grid">
           {jobs.map((job) => {

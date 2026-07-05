@@ -31,9 +31,10 @@ function Home() {
   const [vOverride, setVOverride] = useState<Verdict | null>(null);
   const [batchId, setBatchId] = useState<string | null>(() => restoredBatch.batchId);
   const [uploadFailures, setUploadFailures] = useState<{ filename: string; error: string }[]>([]);
+  const [uploadsSettled, setUploadsSettled] = useState(false);
   const analyze = useAnalyze();
   const job = useJob(jobId);
-  const batchJobs = useBatchJobs(batchId);
+  const batchJobs = useBatchJobs(batchId, uploadsSettled);
 
   // Держим ссылку в актуальном состоянии: перезагрузка страницы должна вернуть к тому же
   // анализу (или к той же партии), а не к пустому экрану загрузки.
@@ -68,12 +69,14 @@ function Home() {
     setStartedAt(null);
     setVOverride(null);
     setUploadFailures([]);
+    setUploadsSettled(false);
     setBatchId(id);
     Promise.allSettled(files.map((f) => analyzeApi(f, id))).then((results) => {
       const failed = results
         .map((res, i) => (res.status === "rejected" ? { filename: files[i].name, error: String(res.reason) } : null))
         .filter((x): x is { filename: string; error: string } => x !== null);
       if (failed.length) setUploadFailures((prev) => [...prev, ...failed]);
+      setUploadsSettled(true);
     });
   }
 
@@ -105,6 +108,7 @@ function Home() {
     setVOverride(null);
     setBatchId(null);
     setUploadFailures([]);
+    setUploadsSettled(false);
   }
 
   const result = job.data?.status === "done" ? job.data.result : null;
@@ -164,6 +168,7 @@ function Home() {
         <BatchGallery
           batchId={batchId!}
           jobs={batchJobs.data ?? []}
+          uploadsSettled={uploadsSettled}
           onOpen={openBatchItem}
           onNewAnalysis={resetToUpload}
         />

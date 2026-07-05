@@ -17,15 +17,20 @@ export function useJob(id: string | null) {
     },
   });
 }
-export function useBatchJobs(batchId: string | null) {
+export function useBatchJobs(batchId: string | null, uploadsSettled: boolean) {
   return useQuery({
     queryKey: ["batch", batchId],
     queryFn: () => listJobsByBatch(batchId as string),
     enabled: !!batchId,
     refetchInterval: (q) => {
       const jobs = q.state.data;
-      // No rows yet could mean "still uploading" — keep polling rather than giving up.
-      if (!jobs || jobs.length === 0) return 800;
+      if (!jobs) return 800;
+      if (jobs.length === 0) {
+        // Empty could mean "still uploading" (keep polling) or "every upload in
+        // this batch already failed, no job will ever land" (stop) — only the
+        // caller knows which, since a failed POST never reaches the job store.
+        return uploadsSettled ? false : 800;
+      }
       const pending = jobs.some((j) => j.status === "queued" || j.status === "running");
       return pending ? 800 : false;
     },
