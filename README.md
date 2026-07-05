@@ -124,6 +124,8 @@ Source of the trained artifacts: the origin hackathon repo `hakaton_nornikel`, e
 `hakaton_nornikel/out/classifier.pkl` — training scripts stay there, only the runtime pipeline is
 vendored here (`backend/app/shlif/`, see `backend/app/shlif/VENDORED.md`).
 
+Models here: https://disk.yandex.ru/d/DXGQgHBYe7eYgA
+
 ## CPU / GPU auto-detect
 
 The backend never hard-requires a GPU. `app.pipeline.loader.gpu_available()` checks
