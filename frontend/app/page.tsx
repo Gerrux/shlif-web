@@ -63,7 +63,13 @@ function Home() {
   }
 
   function startBatch(files: File[]) {
-    const id = crypto.randomUUID();
+    // crypto.randomUUID() only exists in secure contexts (HTTPS or localhost) — over plain
+    // HTTP on a LAN IP or non-TLS domain it's simply undefined, so fall back to a
+    // non-cryptographic id. batch_id is just a client-side grouping key, not a security token.
+    const id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     setFile(null);
     setJobId(null);
     setStartedAt(null);
